@@ -1,5 +1,7 @@
 # Custom
 /data
+/PBI
+
 # History files
 .Rhistory
 .Rapp.history
