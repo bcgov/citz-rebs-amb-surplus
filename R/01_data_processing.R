@@ -2,7 +2,7 @@ library(dplyr)
 library(openxlsx2)
 library(here)
 
-# Work with output files ####
+# load Python output files ####
 Bridge_Facility <- arrow::read_parquet(here(
     "data/output/Py_Bridge_Facility.parquet"
 ))
