@@ -1,8 +1,15 @@
 library(dplyr)
 library(openxlsx2)
 library(here)
+library(httr2)
+library(jsonlite)
+library(stringr)
+library(tidyr)
+library(tools)
 
-# Province Wide Occupancy ####
+
+# Prep datasets ####
+## Province Wide Occupancy ####
 PWOR <- read_xlsx(
   here(
     "data/ho-rplm-report-pmr3345-province-wide-occupancy-2025-04-03152308.604.xlsx"
@@ -57,9 +64,22 @@ cleanPWOR <- PWOR |>
     ContractCode = `Contract Code`,
     AgreementType = `Agreement Type`,
     CustomerCategory = `Customer Category`
-  )
+  ) |>
+  filter(!UOM %in% c("M2", "HA")) |>
+  distinct()
 
-# Customer Agreement Report ####
+write.csv(
+  cleanPWOR,
+  here("data/output/CleanedProvinceWideOccupancy.csv"),
+  row.names = FALSE
+)
+
+# Minor issue with this is some of the places are off the road network
+# e.g. Summit Of Stagleap or very vague addresses like Hwy 3 Sparwood
+# However this only applies to 142 rows of which many are the same place just different building.
+# lat/lon assignment is not far off.
+
+## Customer Agreement Report ####
 CAR <- read_xlsx(
   here(
     "data/csr0001-2025-03-11113053.016.xlsx"
@@ -68,11 +88,12 @@ CAR <- read_xlsx(
 
 cleanCAR <- CAR |>
   rename(
+    IdentifierCAR = Location,
     ParticipatesInPAM = `Participates In PAM`,
     UploadCharges = `Upload Charges`,
     AgreementNumber = `Agreement #`,
     AgreementStatus = `Agr Status`,
-    FiscalYear = `Fiscal Year`,
+    CAR_FiscalYear = `Fiscal Year`,
     AgreementType = `Agreement Type`,
     LeaseStart = `Lease Start`,
     LeaseExpiry = `Lease Expiry`,
@@ -98,4 +119,69 @@ cleanCAR <- CAR |>
     TotalAdmin = `Total Admin`,
     AdminFee = `Admin Fee`,
     AnnualCharge = `Annual Charge`
+  ) |>
+  select(
+    -c(ParticipatesInPAM, UploadCharges, Description, AgreementDurationEndDate)
+  ) |>
+  mutate(across(
+    BuildingMetricRentableArea:AnnualCharge,
+    ~ as.numeric(gsub(
+      "[^0-9.-]",
+      "",
+      .x
+    ))
+  ))
+
+write.csv(
+  cleanCAR,
+  here("data/output/CleanedCustomerAgreementReport.csv"),
+  row.names = FALSE
+)
+
+## Fiscal Component ####
+Fiscal <- read_xlsx(
+  here(
+    "data/ho-rplm-contract-by-fiscal-by-component-2025-03-25092941.451.xlsx"
+  ),
+  start_row = 3
+)
+
+cleanFiscal <- Fiscal |>
+  rename_with(~ gsub(" ", "", .x)) |>
+  select(-c(starts_with("2324"))) |>
+  rename_with(~ gsub("2425Year", "FY2425", .x)) |>
+  rename_with(~ gsub("&", "", .x)) |>
+  rename_with(~ gsub("%", "", .x)) |>
+  mutate(across(
+    FY2425RentableArea:Variance,
+    ~ as.numeric(gsub(
+      "[^0-9.-]",
+      "",
+      .x
+    ))
+  ))
+
+write.csv(
+  cleanFiscal,
+  here("data/output/CleanedFiscalReport.csv"),
+  row.names = FALSE
+)
+
+## VFA Data ####
+VFAData <- read_xlsx(
+  here(
+    "data/Asset List.xlsx"
   )
+) |>
+  rename_with(str_to_title, everything())
+
+cleanVFA <- VFAData |>
+  filter(!grepl("Archive", Regionname)) |> # remove values marked as archived.
+  select(-c(Region_is_archived)) |>
+  filter(!grepl("^x", Assetnumber)) # some archived values have x or xx for Assetnumber
+
+write.csv(
+  cleanVFA,
+  here("data/output/CleanedVFAAssetList.csv"),
+  row.names = FALSE
+)
