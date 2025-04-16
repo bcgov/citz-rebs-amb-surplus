@@ -9,6 +9,9 @@ library(tools)
 
 options(scipen = 999)
 
+# Goal of this is to take the cleaned scripts and build a well linked address table that links to every row
+# in each of the detail tables (note I haven't fully achieved this yet but really close.)
+
 pworTable <- read.csv(here("data/output/cleanedProvinceWideOccupancy.csv"))
 carTable <- read.csv(here("data/output/cleanedCustomerAgreementReport.csv"))
 vfaTable <- read.csv(here("data/output/cleanedVFAAssetList.csv"))
@@ -17,6 +20,7 @@ fiscalTable <- read.csv(here("data/output/cleanedFiscalReport.csv"))
 # Build Tables ####
 
 ## AddressList ####
+# Initial address list to cover the full scope of addresses prior to geocoding
 AddressList <- pworTable |>
   select(
     Address,
@@ -124,6 +128,7 @@ AddressList <- pworTable |>
   relocate(BuildingNumber, .before = everything()) |>
   distinct()
 
+# Use geocoder to improve addresses
 API_KEY = read.csv("C:/Projects/credentials/bc_geocoder_api_key.csv") |> pull()
 query_url = 'https://geocoder.api.gov.bc.ca/addresses.geojson?addressString='
 
@@ -149,6 +154,7 @@ for (ii in 1:nrow(AddressList)) {
   AddressList$score[ii] <- resp$features[[1]]$properties$score
 }
 
+# touch up results to get best address and city results
 AddressTable <- AddressList |>
   separate_wider_delim(
     geo_name,
@@ -165,10 +171,10 @@ AddressTable <- AddressList |>
     geo_Street = gsub("--", "-", geo_Street),
   ) |>
   mutate(
-    BestAddress = case_when(score >= 90 ~ geo_Street, .default = Address),
+    BestAddress = case_when(score >= 90 ~ geo_Street, .default = InputAddress),
     BestCity = case_when(
       score >= 90 ~ geo_City,
-      .default = toTitleCase(tolower(City))
+      .default = InputCity
     ),
     .after = BuildingNumber
   ) |>
@@ -192,7 +198,6 @@ AddressTable <- AddressList |>
 
 ## R_PWOR_Table ####
 # building and land identifiers
-
 R_PWOR_Table <- pworTable |>
   # filter for owned or strategic leases
   filter(
@@ -217,12 +222,14 @@ R_PWOR_Table <- pworTable |>
     AgreementType,
     CustomerCategory,
     Division,
-    Department
+    Department,
+    InputAddress,
+    InputCity,
+    Score
   )
 
 # test <- R_PWOR_Table |>
 #   filter(LinkAddress != Address)
-
 write.csv(
   R_PWOR_Table,
   here("PBI/Data/R_ProvWideOccupancyTable.csv"),
@@ -230,7 +237,6 @@ write.csv(
 )
 
 ## VFA Table ####
-
 R_VFA_Table <- vfaTable |>
   left_join(AddressTable, by = join_by(Assetnumber == BuildingNumber)) |>
   select(
@@ -257,7 +263,10 @@ R_VFA_Table <- vfaTable |>
     AssetType = Assettype,
     Ri,
     RiCost = Ricost,
-    AssetCostUnit = Asset_costunit
+    AssetCostUnit = Asset_costunit,
+    InputAddress,
+    InputCity,
+    Score
   ) |>
   distinct()
 
@@ -271,8 +280,8 @@ write.csv(
   here("PBI/Data/R_VFATable.csv"),
   row.names = FALSE
 )
-## CAR Table ####
 
+## CAR Table ####
 R_CAR_Table <- carTable |>
   left_join(
     AddressTable,
@@ -297,7 +306,8 @@ R_CAR_Table <- carTable |>
   select(-c(Address, City)) |>
   distinct() |>
   filter(!is.na(BestAddress)) |>
-  filter(!AgreementStatus == "Draft")
+  filter(!AgreementStatus == "Draft") |>
+  rename(Address = BestAddress, City = BestCity)
 
 write.csv(
   R_CAR_Table,
@@ -306,7 +316,6 @@ write.csv(
 )
 
 # Fiscal table ####
-
 R_Fiscal_Table <- fiscalTable |>
   left_join(AddressTable, by = join_by(ContractName == BuildingNumber)) |>
   filter(!is.na(BestAddress)) |>
@@ -317,8 +326,6 @@ R_Fiscal_Table <- fiscalTable |>
     City = BestCity
   ) |>
   relocate(Address, City, LinkAddress, LinkCity, .after = BuildingNumber)
-test <- R_Fiscal_Table |>
-  filter(is.na(BestAddress))
 
 write.csv(
   R_Fiscal_Table,
@@ -326,13 +333,77 @@ write.csv(
   row.names = FALSE
 )
 
+# Use the above created tables to create a trimmed address list after geocoding
+R_PWOR_Table <- read.csv(here("PBI/Data/R_ProvWideOccupancyTable.csv"))
+R_VFA_Table <- read.csv(here("PBI/Data/R_VFATable.csv"))
+R_CAR_Table <- read.csv(here("PBI/Data/R_CustomerAgreementReport.csv"))
+R_Fiscal_Table <- read.csv(here("PBI/Data/R_FiscalTable.csv"))
+
 # Trim AddressList ####
 AddressTableTrim <- R_PWOR_Table |>
-  select(BuildingNumber, Address, City, LinkAddress, LinkCity) |>
-  full_join(R_Fiscal_Table, by = )
+  select(
+    BuildingNumber,
+    Address,
+    City,
+    LinkAddress,
+    LinkCity,
+    InputAddress,
+    InputCity,
+    Score
+  ) |>
+  full_join(
+    R_Fiscal_Table,
+    by = join_by(
+      BuildingNumber,
+      Address,
+      City,
+      LinkAddress,
+      LinkCity,
+      InputAddress,
+      InputCity,
+      Score
+    )
+  ) |>
+  full_join(
+    R_CAR_Table,
+    by = join_by(
+      BuildingNumber,
+      Address,
+      City,
+      LinkAddress,
+      LinkCity,
+      InputAddress,
+      InputCity,
+      Score
+    )
+  ) |>
+  full_join(
+    R_VFA_Table,
+    by = join_by(
+      BuildingNumber,
+      Address,
+      City,
+      LinkAddress,
+      LinkCity,
+      InputAddress,
+      InputCity,
+      Score
+    )
+  ) |>
+  select(
+    BuildingNumber,
+    Address,
+    City,
+    LinkAddress,
+    LinkCity,
+    InputAddress,
+    InputCity,
+    Score
+  ) |>
+  distinct()
 
 write.csv(
-  AddressTable,
+  AddressTableTrim,
   here("PBI/Data/R_AddressTable.csv"),
   row.names = FALSE
 )
