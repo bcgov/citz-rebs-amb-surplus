@@ -9,11 +9,13 @@ Bridge_Facility <- arrow::read_parquet(here(
 Dim_Work_Unit <- arrow::read_parquet(here(
     "data/output/Py_Dim_Work_Unit.parquet"
 ))
-Employee_Telework_Table <- arrow::read_parquet(here(
-    "data/output/Py_Employee_Telework_Table.parquet"
-))
+
 Facility_Table <- arrow::read_parquet(here(
     "data/output/Py_Facility_Table.parquet"
+))
+
+Employee_Telework_Table <- arrow::read_parquet(here(
+    "data/output/Py_Employee_Telework_Table.parquet"
 ))
 HQ_Telework_Table <- arrow::read_parquet(here(
     "data/output/Py_HQ_Telework_Table.parquet"

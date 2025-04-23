@@ -186,7 +186,6 @@ write.csv(
   row.names = FALSE
 )
 
-
 ## Employee Data ####
 Employee_GAL_BCGov = read_xlsx(here("data/2024-12-19 GAL Directory.xlsx")) |>
   select(
@@ -196,13 +195,236 @@ Employee_GAL_BCGov = read_xlsx(here("data/2024-12-19 GAL Directory.xlsx")) |>
     LastName = `Last Name`,
     City,
     Street,
-    EmailAddress = `Email Address`,
+    EmailAddress = `Email Address`, # check for empty or blank rows
     EmployeeID = `Employee ID`,
     JobTitle = `Job Title`,
     Company,
     Division,
     Department
   ) |>
+  mutate(EmployeeID = as.numeric(EmployeeID))
+
+GAL_set <- Employee_GAL_BCGov |>
+  select(
+    FirstName,
+    LastName,
+    EmailAddress, # check for empty or blank rows
+    EmployeeID
+  ) |>
+  mutate(EmployeeID = as.numeric(EmployeeID)) |>
+  distinct()
+
+## Establishment Report ####
+Employee_EstablishmentReportBCGov = read_xlsx(
+  here("data/Establishment Report - All BCPS - 2025-02-24.xlsx"),
+  sheet = "Establishment 2025-02-24"
+) |>
+  # Remove anyone without employment status, transferred out, or unapproved positions
+  filter(`Empl Status` != "NULL") |>
+  filter(!Type %in% c("Int Out", "Ext Out")) |>
+  filter(`Position Status` == "Approved" | is.na(`Position Status`)) |>
+  mutate(EmployeeID = as.numeric(`Empl ID`)) |>
+  select(
+    EmployeeID,
+    City,
+    Company = Organization,
+    Division = `Program Division`,
+    Department = `Program Branch`,
+    DepartmentID = `DeptID`,
+    BusinessUnit = `Business Unit`,
+    Title,
+    Job_Code = `Job Code`
+  ) |>
+  distinct()
+
+Establishment_set <- Employee_EstablishmentReportBCGov |>
+  select(
+    EmployeeID,
+    DepartmentID,
+    BusinessUnit
+  )
+
+## Employee Headcount ####
+Employee_HeadcountCITZ = read_xlsx(
+  here("data/Headcount by Classification - All BCPS - 2025-02-24.xlsx"),
+  sheet = "Headcount 2025-02-24"
+) |>
+  filter(empl_status == "Active" | is.na(empl_status)) |>
+  filter(!is.na(emplid)) |>
+  mutate(HIRE_DT = as.Date(HIRE_DT)) |>
+  group_by(emplid) |>
+  filter(HIRE_DT == max(HIRE_DT)) |>
+  ungroup() |>
+  mutate(EmployeeID = as.numeric(emplid)) |>
+  distinct() |>
+  select(
+    EmployeeID,
+    Name = name,
+    EmailAddress = EMAILID,
+    IDIR,
+    BusinessUnit = business_unit,
+    DepartmentID = deptid,
+  ) |>
+  mutate(EmailAddress = na_if(EmailAddress, "NULL"), IDIR = na_if(IDIR, "NULL"))
+
+Headcount_set <- Employee_HeadcountCITZ |>
+  select(EmployeeID, EmailAddress, IDIR, BusinessUnit, DepartmentID)
+
+## Employee Telework ####
+Employee_TeleworkBCGovPSA = read_xlsx(
+  here(
+    "data/Staff Data For Telework Data Collection - All BCPS - 2025-03-06.xlsx"
+  ),
+  sheet = "Telework All Orgs 2025-03-06"
+) |>
+  filter(Empl_Status == "Active") |>
+  mutate(Street = paste(`Work Address1`, `Work Address2`)) |>
+  mutate(EMAILID = na_if(EMAILID, "NULL")) |>
+  distinct() |>
+  select(
+    FirstName = FIRST_NAME,
+    LastName = LAST_NAME,
+    EmployeeID = EMPLID,
+    EmailAddress = EMAILID,
+    IDIR,
+    DepartmentID = DEPTID,
+    Street,
+    City = `Work City`,
+    DaysInOffice = `Days In Office`,
+    DaysTeleworking = `Days Teleworking`,
+    Sunday,
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday,
+    Saturday,
+    Company = Program,
+    Division = `Program Division`,
+    Branch = `Program Branch`
+  ) |>
+  mutate(
+    EmployeeID = as.numeric(EmployeeID),
+    EmailAddress = na_if(EmailAddress, "NULL"),
+    IDIR = na_if(IDIR, "NULL")
+  ) |>
+  mutate(across(DaysInOffice:Saturday, ~ na_if(., "NULL")))
+
+Telework_set <- Employee_TeleworkBCGovPSA |>
+  select(EmployeeID, EmailAddress, DepartmentID)
+
+## Build EmployeeList ####
+EmployeeList <- Headcount_set |>
+  full_join(
+    Telework_set,
+    by = join_by(EmployeeID, EmailAddress, DepartmentID)
+  ) |>
+  group_by(EmployeeID) |>
+  summarise(
+    EmailAddress = max(EmailAddress),
+    IDIR = max(IDIR),
+    BusinessUnit = max(BusinessUnit),
+    DepartmentID = max(DepartmentID)
+  ) |>
+  ungroup() |>
+  full_join(GAL_set, join_by(EmployeeID, EmailAddress)) |>
+  group_by(EmployeeID) |>
+  summarise(
+    EmailAddress = max(EmailAddress),
+    IDIR = max(IDIR),
+    BusinessUnit = max(BusinessUnit),
+    DepartmentID = max(DepartmentID),
+    FirstName = max(FirstName),
+    LastName = max(LastName)
+  ) |>
+  ungroup() |>
+  full_join(
+    Establishment_set,
+    by = join_by(EmployeeID, DepartmentID, BusinessUnit)
+  ) |>
+  group_by(EmployeeID) |>
+  summarise(
+    EmailAddress = max(EmailAddress),
+    IDIR = max(IDIR),
+    BusinessUnit = max(BusinessUnit),
+    DepartmentID = max(DepartmentID),
+    FirstName = max(FirstName),
+    LastName = max(LastName)
+  ) |>
+  ungroup() |>
+  left_join(
+    Employee_TeleworkBCGovPSA,
+    by = join_by(
+      EmployeeID,
+      FirstName,
+      LastName,
+      EmailAddress,
+      IDIR,
+      DepartmentID
+    )
+  ) |>
+  group_by(EmployeeID) |>
+  fill(DaysInOffice:Saturday, .direction = "downup") |>
+  distinct() |>
+  left_join(
+    Employee_EstablishmentReportBCGov,
+    by = join_by(EmployeeID, BusinessUnit, DepartmentID)
+  ) |>
+  distinct() |>
+  left_join(
+    Employee_GAL_BCGov,
+    by = join_by(EmployeeID, EmailAddress, FirstName, LastName)
+  ) |>
+  select(-c(Division, JobTitle, Job_Code, Name, Title)) |>
+  distinct()
+
+Address <- EmployeeList |>
+  select(EmployeeID, City, City.x, City.y, Street.x, Street.y) |>
+  pivot_longer(
+    cols = contains("City"),
+    names_to = "Column_Set",
+    values_to = "City_Set"
+  ) |>
+  group_by(EmployeeID, City_Set) |>
+  mutate(rowcount = n()) |>
+  group_by(EmployeeID) |>
+  slice(which.max(rowcount)) |>
+  select(-c(rowcount, Column_Set)) |>
+  mutate(Street = case_when(is.na(Street.y) ~ Street.x, .default = Street.y)) |>
+  select(-c(Street.x, Street.y))
+
+EmployeeList2 <- EmployeeList |>
+  select(-c(City, City.x, City.y, Street.x, Street.y)) |>
+  left_join(Address, by = join_by(EmployeeID)) |>
+  mutate(
+    Ministry = case_when(is.na(Company) ~ Company.y, .default = Company),
+    Department = case_when(
+      is.na(Department.y) ~ Department.x,
+      .default = Department.y
+    )
+  ) |>
+  select(
+    -c(
+      Company.x,
+      Company,
+      Company.y,
+      Division.x,
+      Division.y,
+      Branch,
+      Department.x,
+      Department.y
+    )
+  )
+
+## Geocode Address ####
+Address <- EmployeeList2 |>
+  select(EmployeeID, InputStreet = Street) |>
+  filter(InputStreet != "0 – Confidential Location") |> # Can't reveal their secrets
+  mutate(InputStreet = gsub("–", "-", InputStreet)) |> # weird character replacement
+  mutate(InputStreet = gsub(",", "", InputStreet)) |>
+
+  # Geocode Address
+  #|>
   mutate(InputStreet = Street, InputCity = City) |>
   filter(InputStreet != "0 – Confidential Location") |> # Can't reveal their secrets
   mutate(InputStreet = gsub("–", "-", InputStreet)) |> # weird character replacement
@@ -248,6 +470,7 @@ Employee_GAL_BCGov = read_xlsx(here("data/2024-12-19 GAL Directory.xlsx")) |>
     InputCity = na_if(InputCity, ""),
     InputCity = na_if(InputCity, " ")
   )
+# check for duplicates??
 
 EmployeeAddressList <- Employee_GAL_BCGov |>
   select(Street, City, InputStreet, InputCity) |>
@@ -259,29 +482,6 @@ EmployeeAddressList <- Employee_GAL_BCGov |>
 #   filter(is.na(InputStreet))
 # test <- EmployeeAddressList |>
 #   filter(grepl("P.O.", InputStreet))
-# Use geocoder to improve addresses
-API_KEY = read.csv("C:/Projects/credentials/bc_geocoder_api_key.csv") |> pull()
-query_url = 'https://geocoder.api.gov.bc.ca/addresses.geojson?addressString='
-
-for (ii in 1:nrow(EmployeeAddressList)) {
-  location <- paste0(
-    str_replace_all(EmployeeAddressList[ii, "InputStreet"], " ", "%20"),
-    "%20",
-    str_replace_all(EmployeeAddressList[ii, "InputCity"], " ", "%20")
-  )
-  req <- request(paste0(query_url, location)) |>
-    req_headers(API_KEY = API_KEY) |>
-    req_perform()
-  resp <- req |> resp_body_json()
-  EmployeeAddressList$GeoStreet[ii] <- resp$features[[1]]$properties$fullAddress
-  EmployeeAddressList$GeoType[ii] <- resp$features[[
-    1
-  ]]$properties$matchPrecision
-  EmployeeAddressList$Precision[ii] <- resp$features[[
-    1
-  ]]$properties$precisionPoints
-  EmployeeAddressList$Score[ii] <- resp$features[[1]]$properties$score
-}
 
 EmployeeAddressList <- EmployeeAddressList |>
   filter(Score >= 90 | Precision == 100 & Score > 80)
@@ -292,26 +492,82 @@ write.csv(
   row.names = FALSE
 )
 
-Employee_EstablishmentReportBCGov = read_xlsx(
-  here("data/Establishment Report - All BCPS - 2025-02-24.xlsx"),
-  sheet = "Establishment 2025-02-24"
-) |>
-  filter(`Empl Status` != "NULL") |>
-  select(
-    EmployeeID = `Empl ID`,
-    Company = Organization,
-    Division = `Program Division`,
-    Department = `Program Branch`,
-    DepartmentID = `DeptID`
+EmployeeAddressList <- read.csv(here("PBI/Data/GalEmployeeAddress.csv"))
+
+Employee_GAL_BCGov <- Employee_GAL_BCGov |>
+  left_join(
+    EmployeeAddressList,
+    by = join_by(Street, City, InputStreet, InputCity)
+  ) |>
+  mutate(EmployeeID = as.numeric(EmployeeID))
+
+
+Employee_Telework_Table <- arrow::read_parquet(here(
+  "data/output/Py_Employee_Telework_Table.parquet"
+))
+
+match_list <- Employee_Telework_Table |>
+  select(Start) |>
+  mutate(
+    GeoStreet = "",
+    GeoType = "",
+    Score = "",
+    Precision = ""
+  ) |>
+  distinct()
+
+# Use geocoder to improve addresses
+API_KEY = read.csv("C:/Projects/credentials/bc_geocoder_api_key.csv") |> pull()
+query_url = 'https://geocoder.api.gov.bc.ca/addresses.geojson?addressString='
+
+for (ii in 1:nrow(match_list)) {
+  location <- paste0(
+    str_replace_all(match_list[ii, "Start"], " ", "%20")
+  )
+  req <- request(paste0(query_url, location)) |>
+    req_headers(API_KEY = API_KEY) |>
+    req_perform()
+  resp <- req |> resp_body_json()
+  match_list$GeoStreet[ii] <- resp$features[[
+    1
+  ]]$properties$fullAddress
+  match_list$GeoType[ii] <- resp$features[[
+    1
+  ]]$properties$matchPrecision
+  match_list$Precision[ii] <- resp$features[[
+    1
+  ]]$properties$precisionPoints
+  match_list$Score[ii] <- resp$features[[1]]$properties$score
+}
+
+Employee_Telework_geo <- Employee_Telework_Table |>
+  left_join(match_list, by = join_by(Start))
+
+HQ_Telework_Table <- arrow::read_parquet(here(
+  "data/output/Py_HQ_Telework_Table.parquet"
+)) |>
+  mutate(
+    GeoStreet = "",
+    GeoType = "",
+    Score = "",
+    Precision = "",
+    .after = AddressEdit
   )
 
-Employee_HeadcountCITZ = read_xlsx(
-  here("data/Headcount by Classification - All BCPS - 2025-02-24.xlsx"),
-  sheet = "Headcount 2025-02-24"
-)
-Employee_TeleworkBCGovPSA = read_xlsx(
-  here(
-    "data/Staff Data For Telework Data Collection - All BCPS - 2025-03-06.xlsx"
-  ),
-  sheet = "Telework All Orgs 2025-03-06"
-)
+for (ii in 1:nrow(HQ_Telework_Table)) {
+  location <- paste0(
+    str_replace_all(HQ_Telework_Table[ii, "Start"], " ", "%20")
+  )
+  req <- request(paste0(query_url, location)) |>
+    req_headers(API_KEY = API_KEY) |>
+    req_perform()
+  resp <- req |> resp_body_json()
+  HQ_Telework_Table$GeoStreet[ii] <- resp$features[[1]]$properties$fullAddress
+  HQ_Telework_Table$GeoType[ii] <- resp$features[[
+    1
+  ]]$properties$matchPrecision
+  HQ_Telework_Table$Precision[ii] <- resp$features[[
+    1
+  ]]$properties$precisionPoints
+  HQ_Telework_Table$Score[ii] <- resp$features[[1]]$properties$score
+}
