@@ -85,7 +85,9 @@ Employee_Telework_Table <- Employee_Telework_Table |>
   select(-c(Province, address_type)) |>
   mutate(
     BestAddress = case_when(is.na(BestAddress) ~ Match, .default = BestAddress)
-  )
+  ) |>
+  mutate(Address = BestAddress, AddressEdit = Match, .after = EmailAddress) |>
+  select(-c(X, BestAddress, BestCity, geo_Street, geo_City, lat, lon))
 
 AddressListFinal <- AddressListFinal |>
   select(-c(Start)) |>
@@ -115,6 +117,25 @@ HQ_Telework_Table <- HQ_Telework_Table |>
 
 write.csv(
   Employee_Telework_Table,
-  here("PBI/data/R_Employee_Telework_Table.csv")
+  here("PBI/data/R_Employee_Telework_Table.csv"),
+  row.names = FALSE
 )
-write.csv(HQ_Telework_Table, here("PBI/data/R_HQ_Telework_Table.csv"))
+write.csv(
+  HQ_Telework_Table,
+  here("PBI/data/R_HQ_Telework_Table.csv"),
+  row.names = FALSE
+)
+
+R_Bridge_Address_Table <- Employee_Telework_Table |>
+  select(Address) |>
+  distinct() |>
+  full_join(
+    HQ_Telework_Table |> select(Address) |> distinct(),
+    by = join_by(Address)
+  )
+
+write.csv(
+  R_Bridge_Address_Table,
+  here("PBI/data/R_Bridge_Address_Table.csv"),
+  row.names = FALSE
+)

@@ -7,8 +7,6 @@ library(stringr)
 library(tidyr)
 library(tools)
 
-
-# Prep datasets ####
 ## Province Wide Occupancy ####
 PWOR <- read_xlsx(
   here(
@@ -185,6 +183,37 @@ write.csv(
   here("data/output/CleanedVFAAssetList.csv"),
   row.names = FALSE
 )
+
+## Project Costs Data ####
+# Think this is the wrong section for this
+R_Facility_Table <- read.csv(here("PBI/data/R_AddressTable.csv"))
+
+ProjectCostsCBRE <- read_xlsx(
+  here("data/ProjectReportApril152025.xlsx"),
+  sheet = "CBRE"
+) |>
+  mutate(Source = "CBRE", .before = everything())
+
+ProjectCostsWDS <- read_xlsx(
+  here("data/ProjectReportApril152025.xlsx"),
+  sheet = "WDS"
+) |>
+  mutate(Source = "WBS", .before = everything())
+
+ProjectCosts <- rbind(ProjectCostsCBRE, ProjectCostsWDS) |>
+  rename_with(~ gsub(" ", "", .), everything()) |>
+  rename_with(~ gsub("/[\\n]?", "", perl = TRUE, .), everything()) |>
+  rename_with(~ gsub("[/()#%]", "", .), everything())
+
+colnames(ProjectCosts)
+
+ProjectFacilityCosts <- R_Facility_Table |>
+  left_join(ProjectCosts, by = join_by(BuildingNumber == BuildingID)) |>
+  select(-c(LinkAddress, LinkCity, InputAddress, InputCity, Score)) |>
+  relocate(ProjectStatus, PlannedEstimate:Paid, .after = KahuaProjectNumber)
+
+colnames(ProjectFacilityCosts)
+ProjectFacilityCosts |> select(ProjectStatus) |> distinct()
 
 ## Employee Data ####
 Employee_GAL_BCGov = read_xlsx(here("data/2024-12-19 GAL Directory.xlsx")) |>

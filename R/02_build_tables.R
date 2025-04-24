@@ -315,7 +315,7 @@ write.csv(
   row.names = FALSE
 )
 
-# Fiscal table ####
+## Fiscal table ####
 R_Fiscal_Table <- fiscalTable |>
   left_join(AddressTable, by = join_by(ContractName == BuildingNumber)) |>
   filter(!is.na(BestAddress)) |>
@@ -334,11 +334,6 @@ write.csv(
 )
 
 # Use the above created tables to create a trimmed address list after geocoding
-R_PWOR_Table <- read.csv(here("PBI/Data/R_ProvWideOccupancyTable.csv"))
-R_VFA_Table <- read.csv(here("PBI/Data/R_VFATable.csv"))
-R_CAR_Table <- read.csv(here("PBI/Data/R_CustomerAgreementReport.csv"))
-R_Fiscal_Table <- read.csv(here("PBI/Data/R_FiscalTable.csv"))
-
 # Trim AddressList ####
 AddressTableTrim <- R_PWOR_Table |>
   select(
