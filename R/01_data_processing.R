@@ -71,7 +71,6 @@ cleanPWOR <- PWOR |>
     mutate(PrimaryUse = toTitleCase(tolower(PrimaryUse))) |>
     distinct()
 
-cleanPWOR |> select(PrimaryUse) |> distinct()
 write.csv(
     cleanPWOR,
     here("data/output/CleanedProvinceWideOccupancy.csv"),

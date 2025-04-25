@@ -20,31 +20,6 @@ buildings_report <- read_xlsx(
   ) |>
   rename_with(~ gsub("[\\.]?[?]?[-]?", "", .), cols = everything()) |>
   rename_with(~ gsub("ft²", "", .), .cols = everything()) |>
-  # remove fully na or otherwise unwanted columns
-  select(
-    -c(
-      Address2,
-      LocationType,
-      BuildingGraphic,
-      RealPropertyUniqueIdentifier,
-      BuildingNumber,
-      ConditionIndex,
-      RegionName,
-      ProvincialRegion,
-      BuildingUse
-    )
-  ) |>
-  # remove junk
-  filter(!is.na(Address) | Address != "Dummy Building") |>
-  relocate(
-    BuildingCode,
-    Address,
-    CityCode,
-    CityName,
-    RegionCode,
-    PostalCode,
-    .before = BuildingName
-  ) |>
   # Remove leased buildings other than strategic leases
   filter(
     Tenure == "OWNED" |
@@ -54,60 +29,40 @@ buildings_report <- read_xlsx(
   mutate(
     City = toTitleCase(tolower(CityCode)),
     Region = toTitleCase(tolower(RegionCode)),
+    Tenure = toTitleCase(tolower(Tenure)),
     .after = Address,
+    .keep = "unused"
   ) |>
   mutate(
     City = case_when(
       City == "Daajing Giids (Queen Charlotte)" ~ "Daajing Giids",
       .default = City
-    )
+    ),
+    FacilityType = na_if(FacilityType, " "),
+    StrategicClassification = na_if(StrategicClassification, " ")
   ) |>
-  mutate(
-    Tenure = toTitleCase(tolower(Tenure)),
-    OccupancyStatus = toTitleCase(tolower(OccupancyStatus))
-  ) |>
-  # Remove leftover columns from cleaning or those with mainly missing data/unhelpful data
+  # Setup to join with lands
   select(
-    -c(
-      CityCode,
-      CityName,
-      RegionCode,
-      LeaseStatus,
-      DateBuilt,
-      OccupancyStatus,
-      HistoricBuilding,
-      BuildingOccupancy,
-      CostperArea,
-      CosttoReplace,
-      MaxBldgOccupancy,
-      PostalCode,
-      POBCStatus,
-      ExtGrossArea,
-      IntGrossArea,
-      ValueMarket,
-      DateMarketValueAssessed
-    )
-  ) |>
-  relocate(
-    StrategicClassification,
-    FacilityType,
-    RentableArea,
-    UsableArea,
-    .after = Tenure
-  ) |>
-  mutate(
     Identifier = BuildingCode,
     Name = BuildingName,
-    .before = everything(),
-    .keep = "unused"
+    PropertyCode,
+    SiteCode,
+    Address,
+    City,
+    FacilityType,
+    PrimaryUse,
+    StrategicClassification,
+    BuildingRentableArea = RentableArea,
+    UsableArea,
+    Latitude,
+    Longitude
   ) |>
-  mutate(LandArea = NA)
+  mutate(LandArea = NA, .before = BuildingRentableArea)
 
 lands_report <- read_xlsx(
   here("data/portfolio-report-builders-2025-04-24-land-data.xlsx"),
   start_row = 3
 ) |>
-  filter(`Property Status` == "OWNED") |>
   # Clean up column names
   rename_with(~ gsub(" ", "", .), cols = everything()) |>
   rename(
@@ -115,17 +70,12 @@ lands_report <- read_xlsx(
   ) |>
   rename_with(~ gsub("[\\.]?[?]?[-]?", "", .), cols = everything()) |>
   rename_with(~ gsub("ft²", "", .), .cols = everything()) |>
-  rename(
-    Tenure = PropertyStatus,
-    City = CityName,
-    Region = RegionCode,
-    RentableArea = AreaBldgRentable
-  ) |>
-  relocate(Address, City, Region, .after = PropertyCode) |>
+  filter(PropertyStatus == "OWNED") |>
   mutate(
-    City = toTitleCase(tolower(City)),
-    Region = toTitleCase(tolower(Region)),
-    Tenure = toTitleCase(tolower(Tenure))
+    City = toTitleCase(tolower(CityName)),
+    Region = toTitleCase(tolower(RegionCode)),
+    Tenure = toTitleCase(tolower(PropertyStatus)),
+    .keep = "unused"
   ) |>
   mutate(
     City = case_when(
@@ -133,24 +83,40 @@ lands_report <- read_xlsx(
       .default = City
     )
   ) |>
-  mutate(Identifier = PropertyCode, Name = PropertyName) |>
-  select(-c(POBCStatus, PrimaryUse, PropertyName, AreaLeaseNegotiated)) |>
-  mutate(FacilityType = "Land", UsableArea = NA, PrimaryUse = NA)
-
-Facility_Table <- rbind(buildings_report, lands_report) |>
   mutate(
-    FacilityType = na_if(FacilityType, " "),
+    Identifier = PropertyCode,
+    PrimaryUse = na_if(PrimaryUse, " "),
     StrategicClassification = na_if(StrategicClassification, " ")
   ) |>
-  select(-c(Region)) |>
-  relocate(PrimaryUse, LandArea, .after = FacilityType)
+  mutate(FacilityType = "Land", UsableArea = NA) |>
+  select(
+    Identifier,
+    Name = PropertyName,
+    PropertyCode,
+    SiteCode,
+    Address,
+    City,
+    FacilityType,
+    PrimaryUse,
+    StrategicClassification,
+    LandArea,
+    BuildingRentableArea = AreaBldgRentable,
+    UsableArea,
+    Latitude,
+    Longitude
+  )
+
+Facility_Table <- rbind(buildings_report, lands_report)
 
 AddressList <- Facility_Table |>
-  select(AddressStart = Address, City) |>
+  select(
+    LinkAddress = Address,
+    City
+  ) |>
+  #mutate(AddressInput = gsub("[-]", " ", AddressStart)) |>
+  mutate(AddressEdit = gsub("[\\.]", " ", LinkAddress)) |>
+  mutate(AddressEdit = gsub("[_]", " ", AddressEdit)) |>
   distinct() |>
-  mutate(AddressInput = gsub("[-]", " ", AddressStart)) |>
-  mutate(AddressInput = gsub("[\\.]", " ", AddressInput)) |>
-  mutate(AddressInput = gsub("[_]", " ", AddressInput)) |>
   mutate(
     geo_name = "",
     address_type = "",
@@ -158,7 +124,8 @@ AddressList <- Facility_Table |>
     precision = "",
     lat = "",
     lon = ""
-  )
+  ) |>
+  distinct()
 
 # Use geocoder to improve addresses
 API_KEY = read.csv("C:/Projects/credentials/bc_geocoder_api_key.csv") |> pull()
@@ -166,7 +133,7 @@ query_url = 'https://geocoder.api.gov.bc.ca/addresses.geojson?addressString='
 
 for (ii in 1:nrow(AddressList)) {
   location <- paste0(
-    str_replace_all(AddressList[ii, "AddressInput"], " ", "%20"),
+    str_replace_all(AddressList[ii, "AddressEdit"], " ", "%20"),
     "%20",
     str_replace_all(AddressList[ii, "City"], " ", "%20")
   )
@@ -206,17 +173,17 @@ AddressListFinal <- AddressList |>
   mutate(
     Address = case_when(
       score >= 85 & precision >= 99 ~ geo_Street,
-      .default = AddressInput
+      .default = AddressEdit
     ),
     City = case_when(
       score >= 85 & precision >= 99 ~ geo_City,
       .default = City
     )
   ) |>
-  mutate(LinkAddress = AddressStart) |>
   select(
     Address,
     City,
+    AddressEdit,
     LinkAddress,
     GeoScore = score,
     GeoPrecision = precision,
@@ -224,14 +191,128 @@ AddressListFinal <- AddressList |>
     GeoLon = lon
   )
 
-write.csv(
-  AddressListFinal,
-  here("Data/output/portfolio_address_list.csv"),
-  row.names = FALSE
-)
+# Clean up duplicate land values between buildings and properties tables
+R_Facility_table <- Facility_Table |>
+  left_join(AddressListFinal, by = join_by(Address == LinkAddress, City)) |>
+  rename(LinkAddress = Address, Address = Address.y) |>
+  relocate(Address, AddressEdit, LinkAddress, .after = SiteCode) |>
+  group_by(Identifier) |>
+  summarise(
+    Name = first(Name),
+    PropertyCode = first(PropertyCode, na_rm = TRUE),
+    SiteCode = first(SiteCode, na_rm = TRUE),
+    Address = first(Address, na_rm = TRUE),
+    AddressEdit = first(AddressEdit, na_rm = TRUE),
+    LinkAddress = first(LinkAddress, na_rm = TRUE),
+    City = first(City, na_rm = TRUE),
+    FacilityType = first(FacilityType, na_rm = TRUE),
+    PrimaryUse = first(PrimaryUse, na_rm = TRUE),
+    StrategicClassification = first(StrategicClassification, na_rm = TRUE),
+    LandArea = first(LandArea, na_rm = TRUE),
+    BuildingRentableArea = sum(BuildingRentableArea, na_rm = TRUE),
+    UsableArea = sum(UsableArea, na_rm = TRUE),
+    Latitude = first(Latitude, na_rm = TRUE),
+    Longitude = first(Longitude, na_rm = TRUE),
+    GeoScore = first(GeoScore, na_rm = TRUE),
+    GeoPrecision = first(GeoPrecision, na_rm = TRUE)
+  )
 
-OG_Address <- read.csv(here("PBI/Data/R_AddressTable.csv")) |>
-  select(Address) |>
-  distinct()
+# check for vacant land
 
-# Produces a different amount of buildings from my merge efforts...
+vacant_land <- read_xlsx(
+  here("data/PMR3678-Active-Land-No-Active-Buildings.xlsx"),
+  start_row = 3
+) |>
+  fill(`City ID`, .direction = "down") |>
+  mutate(
+    City = toTitleCase(tolower(`City ID`)),
+    .keep = "unused",
+    .after = Address
+  ) |>
+  rename_with(~ gsub(" ", "", .), cols = everything()) |>
+  group_by(City) |>
+  fill(Address, .direction = "down") |>
+  ungroup() |>
+  filter(!is.na(Address)) |>
+  filter(!is.na(LandName)) |>
+  filter(Tenure == "OWNED") |>
+  filter(OccupancyStatus == "VACANT")
+
+pwor <- read_xlsx(
+  here(
+    "data/ho-rplm-report-pmr3345-province-wide-occupancy-2025-04-03152308.604.xlsx"
+  ),
+  start_row = 3
+) |>
+  mutate(
+    Identifier = `Building/Land #`,
+    IdentifierType = case_when(
+      startsWith(as.character(`Building/Land #`), "N") ~ "Land",
+      startsWith(as.character(`Building/Land #`), "B") ~ "Building",
+      .default = NA
+    ),
+    Contract = case_when(
+      Tenure == "LEASED" &
+        `Contract / Building / Property Number` == "N/A" ~
+        NA,
+      Tenure == "LEASED" ~ `Contract / Building / Property Number`,
+      .default = NA
+    ),
+    .before = everything()
+  ) |>
+  mutate(
+    TotalRentableArea = as.numeric(gsub(
+      "[^0-9.-]",
+      "",
+      `Total Rentable Area Leased/Owned by RPD`
+    )),
+    InventoryAllocatedRentableArea = as.numeric(gsub(
+      "[^0-9.-]",
+      "",
+      `Inventory Allocated Rentable Area`
+    )),
+    CustomerAllocationPercentage = as.numeric(
+      `Customer Allocation Percentage of Location`
+    ),
+    .after = `Primary Use`
+  ) |>
+  select(
+    -c(
+      `Total Rentable Area Leased/Owned by RPD`,
+      `Inventory Allocated Rentable Area`,
+      `Customer Allocation Percentage of Location`,
+      `Building/Land #`,
+      `Contract / Building / Property Number`
+    )
+  ) |>
+  rename(
+    LeaseExpiryDate = `Lease Expiry Date`,
+    PrimaryUse = `Primary Use`,
+    ContractCode = `Contract Code`,
+    AgreementType = `Agreement Type`,
+    CustomerCategory = `Customer Category`
+  ) |>
+  filter(!UOM %in% c("M2", "HA")) |>
+  mutate(PrimaryUse = toTitleCase(tolower(PrimaryUse))) |>
+  distinct() |>
+  group_by(Identifier) |>
+  mutate(rowcount = n()) |>
+  ungroup() |>
+  # fix for 4 cases where AgreementType is NA but its a single plot of land
+  mutate(
+    AgreementType = case_when(
+      is.na(AgreementType) & startsWith(Identifier, "N") & rowcount == 1 ~
+        "Land Only",
+      .default = AgreementType
+    )
+  ) |>
+  select(-c(rowcount)) |>
+  # find vacant plots in that they only have Land Only Agreements
+  group_by(Identifier) |>
+  filter(if_all(AgreementType, ~ startsWith(AgreementType, "Land Only"))) |>
+  filter(Tenure == "OWNED")
+
+test <- pwor |>
+  group_by(Identifier) |>
+  filter(if_any(AgreementType, is.na)) |>
+  filter(Tenure == "OWNED")
