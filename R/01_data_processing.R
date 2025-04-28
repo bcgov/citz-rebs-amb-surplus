@@ -593,8 +593,6 @@ write.csv(
 )
 
 ## Project Costs Data ####
-# Think this is the wrong section for this
-R_Facility_Table <- read.csv(here("PBI/data/R_AddressTable.csv"))
 
 ProjectCostsCBRE <- read_xlsx(
     here("data/ProjectReportApril152025.xlsx"),
@@ -632,7 +630,8 @@ ProjectCostsSummary <- ProjectCosts |>
     ) |>
     filter(
         !is.na(BuildingID) & !BuildingID %in% c("9999100", "9999200", "9999300")
-    )
+    ) |>
+    left_join(R_Facility_Table, by = join_by())
 
 # This could be joined to the facility table at this point, or a building data table.
 

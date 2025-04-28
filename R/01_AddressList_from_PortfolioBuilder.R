@@ -192,10 +192,11 @@ AddressListFinal <- AddressList |>
   )
 
 # Clean up duplicate land values between buildings and properties tables
-R_Facility_table <- Facility_Table |>
-  left_join(AddressListFinal, by = join_by(Address == LinkAddress, City)) |>
-  rename(LinkAddress = Address, Address = Address.y) |>
-  relocate(Address, AddressEdit, LinkAddress, .after = SiteCode) |>
+R_Facility_Table <- Facility_Table |>
+  left_join(AddressListFinal, by = join_by(Address == LinkAddress)) |>
+  rename(LinkAddress = Address, Address = Address.y, City = City.y) |>
+  relocate(Address, AddressEdit, LinkAddress, City, .after = SiteCode) |>
+  select(-c(City.x)) |>
   group_by(Identifier) |>
   summarise(
     Name = first(Name),
@@ -217,102 +218,8 @@ R_Facility_table <- Facility_Table |>
     GeoPrecision = first(GeoPrecision, na_rm = TRUE)
   )
 
-# check for vacant land
-
-vacant_land <- read_xlsx(
-  here("data/PMR3678-Active-Land-No-Active-Buildings.xlsx"),
-  start_row = 3
-) |>
-  fill(`City ID`, .direction = "down") |>
-  mutate(
-    City = toTitleCase(tolower(`City ID`)),
-    .keep = "unused",
-    .after = Address
-  ) |>
-  rename_with(~ gsub(" ", "", .), cols = everything()) |>
-  group_by(City) |>
-  fill(Address, .direction = "down") |>
-  ungroup() |>
-  filter(!is.na(Address)) |>
-  filter(!is.na(LandName)) |>
-  filter(Tenure == "OWNED") |>
-  filter(OccupancyStatus == "VACANT")
-
-pwor <- read_xlsx(
-  here(
-    "data/ho-rplm-report-pmr3345-province-wide-occupancy-2025-04-03152308.604.xlsx"
-  ),
-  start_row = 3
-) |>
-  mutate(
-    Identifier = `Building/Land #`,
-    IdentifierType = case_when(
-      startsWith(as.character(`Building/Land #`), "N") ~ "Land",
-      startsWith(as.character(`Building/Land #`), "B") ~ "Building",
-      .default = NA
-    ),
-    Contract = case_when(
-      Tenure == "LEASED" &
-        `Contract / Building / Property Number` == "N/A" ~
-        NA,
-      Tenure == "LEASED" ~ `Contract / Building / Property Number`,
-      .default = NA
-    ),
-    .before = everything()
-  ) |>
-  mutate(
-    TotalRentableArea = as.numeric(gsub(
-      "[^0-9.-]",
-      "",
-      `Total Rentable Area Leased/Owned by RPD`
-    )),
-    InventoryAllocatedRentableArea = as.numeric(gsub(
-      "[^0-9.-]",
-      "",
-      `Inventory Allocated Rentable Area`
-    )),
-    CustomerAllocationPercentage = as.numeric(
-      `Customer Allocation Percentage of Location`
-    ),
-    .after = `Primary Use`
-  ) |>
-  select(
-    -c(
-      `Total Rentable Area Leased/Owned by RPD`,
-      `Inventory Allocated Rentable Area`,
-      `Customer Allocation Percentage of Location`,
-      `Building/Land #`,
-      `Contract / Building / Property Number`
-    )
-  ) |>
-  rename(
-    LeaseExpiryDate = `Lease Expiry Date`,
-    PrimaryUse = `Primary Use`,
-    ContractCode = `Contract Code`,
-    AgreementType = `Agreement Type`,
-    CustomerCategory = `Customer Category`
-  ) |>
-  filter(!UOM %in% c("M2", "HA")) |>
-  mutate(PrimaryUse = toTitleCase(tolower(PrimaryUse))) |>
-  distinct() |>
-  group_by(Identifier) |>
-  mutate(rowcount = n()) |>
-  ungroup() |>
-  # fix for 4 cases where AgreementType is NA but its a single plot of land
-  mutate(
-    AgreementType = case_when(
-      is.na(AgreementType) & startsWith(Identifier, "N") & rowcount == 1 ~
-        "Land Only",
-      .default = AgreementType
-    )
-  ) |>
-  select(-c(rowcount)) |>
-  # find vacant plots in that they only have Land Only Agreements
-  group_by(Identifier) |>
-  filter(if_all(AgreementType, ~ startsWith(AgreementType, "Land Only"))) |>
-  filter(Tenure == "OWNED")
-
-test <- pwor |>
-  group_by(Identifier) |>
-  filter(if_any(AgreementType, is.na)) |>
-  filter(Tenure == "OWNED")
+write.csv(
+  R_Facility_Table,
+  here("PBI/data/R_Facility_Table.csv"),
+  row.names = FALSE
+)
