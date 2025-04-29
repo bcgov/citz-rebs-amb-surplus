@@ -307,7 +307,8 @@ ProjectCosts <- rbind(ProjectCostsCBRE, ProjectCostsWDS) |>
   ) |>
   left_join(R_Facility_Table, by = join_by(Identifier)) |>
   filter(!is.na(Address)) |>
-  select(Identifier, Name, Address, City, Region, N_Projects, Total_Paid)
+  select(Identifier, Name, Address, City, Region, N_Projects, Total_Paid) |>
+  mutate(Total_Paid = round(Total_Paid, digits = 2))
 
 write.csv(
   ProjectCosts,
@@ -315,7 +316,7 @@ write.csv(
   row.names = FALSE
 )
 
-
+# zoning ####
 # check for vacant land ####
 
 vacant_land <- read_xlsx(
