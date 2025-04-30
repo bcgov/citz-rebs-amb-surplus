@@ -90,14 +90,29 @@ pwor <- read_xlsx(
     Name,
     Address,
     City,
-    Tenure,
-    ContractCode,
-    InventoryAllocatedRentableArea,
-    CustomerAllocationPercentage,
-    UOM,
-    CustomerCategory,
-    Division,
-    Department
+    TotalRentableArea,
+    InventoryAllocatedRentableArea
+  ) |>
+  group_by(Identifier) |>
+  summarise(
+    Name = first(Name),
+    Address = first(Address),
+    City = first(City),
+    TotalRentableArea = first(TotalRentableArea),
+    AllocatedRentableArea = sum(InventoryAllocatedRentableArea, na.rm = TRUE)
+  ) |>
+  ungroup() |>
+  mutate(
+    AllocatedRentableArea = case_when(
+      AllocatedRentableArea > TotalRentableArea ~ TotalRentableArea,
+      .default = AllocatedRentableArea
+    )
+  ) |>
+  mutate(
+    AllocationPercentage = round(
+      AllocatedRentableArea / TotalRentableArea,
+      digits = 2
+    )
   )
 
 write.csv(
@@ -337,3 +352,32 @@ vacant_land <- read_xlsx(
   filter(!is.na(LandName)) |>
   filter(Tenure == "OWNED") |>
   filter(OccupancyStatus == "VACANT")
+
+# Zoning ####
+
+zoning <- read_xlsx(here("data/RPD_Buildings_Zoning.xlsx")) |>
+  filter(
+    Tenure == "Owned" |
+      Address %in% c("4000 Seymour Pl", "4001 Seymour Pl", "1011 4th Ave")
+  ) |>
+  select(
+    Identifier = Building_Number,
+    ZoneCode = ZONE_CODE,
+    ZoneClass = ZONE_CLASS,
+    ParcelName = PARCEL_NAME,
+    ParcelStatus = PARCEL_STATUS,
+    PlanNumber = PLAN_NUMBER,
+    PID,
+    PIN
+  ) |>
+  left_join(R_Facility_Table, by = join_by(Identifier)) |>
+  relocate(Name, Address, City, .after = Identifier) |>
+  select(-c(PropertyCode:GeoPrecision))
+
+write.csv(
+  zoning,
+  here("PBI/Data/R_Zoning_Table.csv"),
+  row.names = FALSE
+)
+
+# Work Orders ####
