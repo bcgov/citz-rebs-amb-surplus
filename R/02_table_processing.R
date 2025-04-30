@@ -6,6 +6,7 @@ library(jsonlite)
 library(stringr)
 library(tidyr)
 library(tools)
+library(lubridate)
 
 options(scipen = 999)
 # R_Facility_Table
@@ -210,7 +211,8 @@ write.csv(
 # Fiscal table ####
 fiscal <- read_xlsx(
   here(
-    "data/ho-rplm-contract-by-fiscal-by-component-2025-03-25092941.451.xlsx"
+    #"data/ho-rplm-contract-by-fiscal-by-component-2025-03-25092941.451.xlsx"
+    "data/contract-by-fiscal-by-component-2025-04-30.xlsx"
   ),
   start_row = 3
 ) |>
@@ -219,7 +221,7 @@ fiscal <- read_xlsx(
   rename_with(~ gsub("2425Year", "FY2425", .x)) |>
   rename_with(~ gsub("&", "", .x)) |>
   rename_with(~ gsub("%", "", .x)) |>
-  rename(Identifier = ContractName) |>
+  rename(Identifier = PrimaryLocation) |>
   mutate(across(
     FY2425RentableArea:Variance,
     ~ as.numeric(gsub(
@@ -228,6 +230,8 @@ fiscal <- read_xlsx(
       .x
     ))
   )) |>
+  # test <- fiscal |> filter(PrimaryLocation != Identifier)
+  # test <- fiscal |> select(Identifier) |> distinct() |>
   left_join(R_Facility_Table, by = join_by(Identifier)) |>
   filter(!is.na(Address)) |>
   relocate(Name, Address, City, .after = Identifier) |>
@@ -355,7 +359,7 @@ vacant_land <- read_xlsx(
 
 # Zoning ####
 
-zoning <- read_xlsx(here("data/RPD_Buildings_Zoning.xlsx")) |>
+zoning_buildings <- read_xlsx(here("data/RPD_Buildings_Zoning.xlsx")) |>
   filter(
     Tenure == "Owned" |
       Address %in% c("4000 Seymour Pl", "4001 Seymour Pl", "1011 4th Ave")
@@ -374,6 +378,27 @@ zoning <- read_xlsx(here("data/RPD_Buildings_Zoning.xlsx")) |>
   relocate(Name, Address, City, .after = Identifier) |>
   select(-c(PropertyCode:GeoPrecision))
 
+zoning_lands <- read_xlsx(here("data/RPD_Land_Zoning.xlsx")) |>
+  filter(
+    Tenure == "Owned" |
+      Address %in% c("4000 Seymour Pl", "4001 Seymour Pl", "1011 4th Ave")
+  ) |>
+  select(
+    Identifier = Land_Number,
+    ZoneCode = ZONE_CODE,
+    ZoneClass = ZONE_CLASS,
+    ParcelName = PARCEL_NAME,
+    ParcelStatus = PARCEL_STATUS,
+    PlanNumber = PLAN_NUMBER,
+    PID,
+    PIN
+  ) |>
+  left_join(R_Facility_Table, by = join_by(Identifier)) |>
+  relocate(Name, Address, City, .after = Identifier) |>
+  select(-c(PropertyCode:GeoPrecision))
+
+zoning <- rbind(zoning_buildings, zoning_lands) |> distinct()
+
 write.csv(
   zoning,
   here("PBI/Data/R_Zoning_Table.csv"),
@@ -381,3 +406,15 @@ write.csv(
 )
 
 # Work Orders ####
+
+workorders <- read.csv(here("data/WO Detail List_Full Data_data.csv")) |>
+  select(
+    Identifier = `Property.ID`,
+    PriorityCode = `Priority.Code`,
+    SLACompletionStatus = `SLA.Completion.Status`,
+    WorkCategory = `Category.Code.Desc`,
+    CompletionDate = `Actual.Completed.Ts`
+  ) |>
+  mutate(CompletionDate = gsub("( [0-9]+:.*)", "", CompletionDate)) |>
+  mutate(CompletionDate = as.Date(CompletionDate, format = "%m/%d/%Y")) |>
+  filter(CompletionDate >= as.Date("2024-03-31", format = ("%Y-%m-%d")))
