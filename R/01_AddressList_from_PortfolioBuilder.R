@@ -19,7 +19,7 @@ buildings_report <- read_xlsx(
     Address = Address1
   ) |>
   rename_with(~ gsub("[\\.]?[?]?[-]?", "", .), cols = everything()) |>
-  rename_with(~ gsub("ft²", "", .), .cols = everything()) |>
+  rename_with(~ gsub("m²", "", .), .cols = everything()) |>
   # Remove leased buildings other than strategic leases
   filter(
     Tenure == "OWNED" |
@@ -28,7 +28,6 @@ buildings_report <- read_xlsx(
   # modify column values
   mutate(
     City = toTitleCase(tolower(CityCode)),
-    Region = toTitleCase(tolower(RegionCode)),
     Tenure = toTitleCase(tolower(Tenure)),
     .after = Address,
     .keep = "unused"
@@ -52,10 +51,13 @@ buildings_report <- read_xlsx(
     FacilityType,
     PrimaryUse,
     StrategicClassification,
-    BuildingRentableArea = RentableArea,
     UsableArea,
+    BuildingRentableArea = RentableArea,
     Latitude,
     Longitude
+  ) |>
+  filter(
+    startsWith(Identifier, "N")
   ) |>
   mutate(LandArea = NA, .before = BuildingRentableArea)
 
@@ -69,11 +71,10 @@ lands_report <- read_xlsx(
     Address = Address1
   ) |>
   rename_with(~ gsub("[\\.]?[?]?[-]?", "", .), cols = everything()) |>
-  rename_with(~ gsub("ft²", "", .), .cols = everything()) |>
+  rename_with(~ gsub("m²", "", .), .cols = everything()) |>
   filter(PropertyStatus == "OWNED") |>
   mutate(
     City = toTitleCase(tolower(CityName)),
-    Region = toTitleCase(tolower(RegionCode)),
     Tenure = toTitleCase(tolower(PropertyStatus)),
     .keep = "unused"
   ) |>
@@ -210,8 +211,8 @@ R_Facility_Table <- Facility_Table |>
     PrimaryUse = first(PrimaryUse, na_rm = TRUE),
     StrategicClassification = first(StrategicClassification, na_rm = TRUE),
     LandArea = first(LandArea, na_rm = TRUE),
-    BuildingRentableArea = sum(BuildingRentableArea, na_rm = TRUE),
-    UsableArea = sum(UsableArea, na_rm = TRUE),
+    BuildingRentableArea = sum(BuildingRentableArea, na.rm = TRUE),
+    UsableArea = sum(UsableArea, na.rm = TRUE),
     Latitude = first(Latitude, na_rm = TRUE),
     Longitude = first(Longitude, na_rm = TRUE),
     GeoScore = first(GeoScore, na_rm = TRUE),

@@ -15,7 +15,7 @@ R_Facility_Table <- read.csv(here("PBI/data/R_Facility_Table.csv"))
 # Province Wide Occupancy ####
 pwor <- read_xlsx(
   here(
-    "data/ho-rplm-report-pmr3345-province-wide-occupancy-2025-04-03152308.604.xlsx"
+    "data/pmr3345-province-wide-occupancy-2025-05-01.xlsx"
   ),
   start_row = 3
 ) |>
@@ -62,7 +62,6 @@ pwor <- read_xlsx(
     AgreementType = `Agreement Type`,
     CustomerCategory = `Customer Category`
   ) |>
-  filter(!UOM %in% c("M2", "HA")) |>
   mutate(PrimaryUse = toTitleCase(tolower(PrimaryUse))) |>
   distinct() |>
   filter(
@@ -92,15 +91,21 @@ pwor <- read_xlsx(
     Address,
     City,
     TotalRentableArea,
-    InventoryAllocatedRentableArea
+    InventoryAllocatedRentableArea,
+    BuildingRentableArea,
+    UsableArea,
+    LandArea
   ) |>
   group_by(Identifier) |>
   summarise(
     Name = first(Name),
     Address = first(Address),
     City = first(City),
-    TotalRentableArea = first(TotalRentableArea),
-    AllocatedRentableArea = sum(InventoryAllocatedRentableArea, na.rm = TRUE)
+    TotalRentableArea = first(TotalRentableArea, na_rm = TRUE),
+    AllocatedRentableArea = sum(InventoryAllocatedRentableArea, na.rm = TRUE),
+    BuildingRentableArea = first(BuildingRentableArea),
+    UsableArea = first(UsableArea),
+    LandArea = first(LandArea)
   ) |>
   ungroup() |>
   mutate(
@@ -116,6 +121,7 @@ pwor <- read_xlsx(
     )
   )
 
+test <- pwor |> filter(BuildingRentableArea > TotalRentableArea)
 write.csv(
   pwor,
   here("PBI/data/R_ProvWideOccupancy_Table.csv"),
@@ -123,6 +129,84 @@ write.csv(
 )
 
 # Customer Agreement Report ####
+car24_26 <- read_xlsx(
+  here(
+    "data/csr0001-FY2425FY2526.xlsx"
+  ),
+  start_row = 3
+)
+
+car22_24 <- read_xlsx(
+  here(
+    "data/csr0001-FY2223FY2324.xlsx"
+  ),
+  start_row = 3
+)
+car20_22 <- read_xlsx(
+  here(
+    "data/csr0001-FY2021FY2122.xlsx"
+  ),
+  start_row = 3
+)
+
+car <- rbind(car20_22, car22_24, car24_26) |>
+  select(
+    Identifier = Location,
+    AgreementNumber = `Agreement #`,
+    AgreementStatus = `Agr Status`,
+    FiscalYear = `Fiscal Year`,
+    AgreementType = `Agreement Type`,
+    LeaseStart = `Lease Start`,
+    LeaseExpiry = `Lease Expiry`,
+    AgreementDurationEndDate = `Agreement Duration End Date`,
+    BuildingRentableArea = `Rentable Area - Building metric`,
+    BuildingAppropriatedArea = `Appropriated Area - Building metric`,
+    BuildingBillableArea = `Billable Area - Building metric`,
+    LandArea = `Area - Land metric`,
+    LandAppropriatedArea = `Appropriated Area - Land metric`,
+    LandBillableArea = `Billable Area - Land metric`,
+    ParkingTotalStalls = `Total Parking Stalls`,
+    ParkingAppropriatedArea = `Appropriated Area - Parking`,
+    ParkingBillableStalls = `Billable Parking Stalls`,
+    BaseRent = `Base rent`,
+    OM = `O&M`,
+    Utilities,
+    OMTotal = `O&M Total`,
+    LLOM = `LL O&M`,
+    Tax,
+    Amort,
+    PrkCost = `Prk Cost`,
+    LLAdmin = `LL Admin`,
+    OMAdmin = `O&M Admin`,
+    UtilAdmin = `Util Admin`,
+    TaxAdmin = `Tax Admin`,
+    TotalAdmin = `Total Admin`,
+    AdminFee = `Admin Fee`,
+    AnnualCharge = `Annual Charge`
+  ) |>
+  left_join(R_Facility_Table, by = join_by(Identifier)) |>
+  relocate(Name, Address, City, .after = Identifier) |>
+  select(-c(PropertyCode:GeoPrecision)) |>
+  rename(
+    LandArea = LandArea.x,
+    BuildingRentableArea = BuildingRentableArea.x
+  ) |>
+  filter(!is.na(Address)) |>
+  mutate(across(
+    BuildingRentableArea:AnnualCharge,
+    ~ as.numeric(gsub(
+      "[^0-9.-]",
+      "",
+      .x
+    ))
+  )) |>
+  group_by(Identifier, Name, Address, City, FiscalYear) |>
+  summarise(across(BuildingRentableArea:AnnualCharge, ~ sum(., na.rm = TRUE)))
+
+
+colnames(car)
+
+###############################
 car <- read_xlsx(
   here(
     "data/csr0001-2025-03-11113053.016.xlsx"
@@ -413,8 +497,49 @@ workorders <- read.csv(here("data/WO Detail List_Full Data_data.csv")) |>
     PriorityCode = `Priority.Code`,
     SLACompletionStatus = `SLA.Completion.Status`,
     WorkCategory = `Category.Code.Desc`,
+    CreationDate = `Creation.Date`,
     CompletionDate = `Actual.Completed.Ts`
   ) |>
   mutate(CompletionDate = gsub("( [0-9]+:.*)", "", CompletionDate)) |>
-  mutate(CompletionDate = as.Date(CompletionDate, format = "%m/%d/%Y")) |>
-  filter(CompletionDate >= as.Date("2024-03-31", format = ("%Y-%m-%d")))
+  mutate(
+    CompletionDate = as.Date(CompletionDate, format = "%m/%d/%Y"),
+    CreationDate = as.Date(CreationDate, format = "%m/%d/%Y")
+  ) |>
+  mutate(
+    FYCreation = case_when(
+      CreationDate |> timetk::between_time('2025-04-01', '2026-03-31') ~
+        "FY2526",
+      CreationDate |> timetk::between_time('2024-04-01', '2025-03-31') ~
+        "FY2425",
+      CreationDate |> timetk::between_time('2023-04-01', '2024-03-31') ~
+        "FY2324",
+      CreationDate |> timetk::between_time('2022-04-01', '2023-03-31') ~
+        "FY2223",
+      CreationDate |> timetk::between_time('2021-04-01', '2022-03-31') ~
+        "FY2122",
+      CreationDate |> timetk::between_time('2020-04-01', '2021-03-31') ~
+        "FY2021",
+    )
+  ) |>
+  group_by(Identifier, FYCreation) |>
+  summarise(
+    WorkOrderCount = n()
+  ) |>
+  pivot_wider(names_from = FYCreation, values_from = WorkOrderCount) |>
+  mutate(across(starts_with("FY"), ~ replace_na(., 0))) |>
+  pivot_longer(
+    starts_with("FY"),
+    names_to = "FYCreation",
+    values_to = "WorkOrderCount"
+  ) |>
+  ungroup() |>
+  left_join(R_Facility_Table, by = join_by(Identifier)) |>
+  relocate(Name, Address, City, .after = Identifier) |>
+  select(-c(PropertyCode:GeoPrecision)) |>
+  filter(!is.na(Address))
+
+write.csv(
+  workorders,
+  here("PBI/Data/R_WorkOrders_Table.csv"),
+  row.names = FALSE
+)
