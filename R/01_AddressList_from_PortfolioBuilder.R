@@ -10,10 +10,13 @@ library(tools)
 options(scipen = 999)
 # Portfolio Reports Processing ####
 
+# From Archibus, Report Builders, Portfolio Report Builders, grab the buildings tab
+# Building Code & Name, Address 1, City/Site/Property Code, Tenure, Building Number, Facility type and Primary Use,
+# Strategic classification, usable and rentable area (col says sqft, set profile to use sqM), lat and long.
 buildings_report <- read_xlsx(
   here("data/portfolio-report-builders-2025-04-24-building-data.xlsx"),
   start_row = 3
-) |> # Clean up column names
+) |> # Clean up column names to be more R friendly
   rename_with(~ gsub(" ", "", .), cols = everything()) |>
   rename(
     Address = Address1
@@ -25,7 +28,7 @@ buildings_report <- read_xlsx(
     Tenure == "OWNED" |
       Address %in% c("4000 Seymour Pl", "4001 Seymour Pl", "1011 4th Ave")
   ) |>
-  # modify column values
+  # modify column values to not hurt my eyeballs.
   mutate(
     City = toTitleCase(tolower(CityCode)),
     Tenure = toTitleCase(tolower(Tenure)),
@@ -33,10 +36,12 @@ buildings_report <- read_xlsx(
     .keep = "unused"
   ) |>
   mutate(
+    # Update Name as it will be easier on geocoder and I think its known at this point
     City = case_when(
       City == "Daajing Giids (Queen Charlotte)" ~ "Daajing Giids",
       .default = City
     ),
+    # clean up blank entries and replace with NA
     FacilityType = na_if(FacilityType, " "),
     StrategicClassification = na_if(StrategicClassification, " ")
   ) |>
@@ -56,9 +61,11 @@ buildings_report <- read_xlsx(
     Latitude,
     Longitude
   ) |>
+  # Remove properties, will collect with lands_report
   filter(
-    startsWith(Identifier, "N")
+    !startsWith(Identifier, "N")
   ) |>
+  # Add column to line up with lands_report
   mutate(LandArea = NA, .before = BuildingRentableArea)
 
 lands_report <- read_xlsx(
@@ -72,12 +79,15 @@ lands_report <- read_xlsx(
   ) |>
   rename_with(~ gsub("[\\.]?[?]?[-]?", "", .), cols = everything()) |>
   rename_with(~ gsub("m²", "", .), .cols = everything()) |>
+  # remove leased lands, strategic leases aren't in here
   filter(PropertyStatus == "OWNED") |>
+  # make data prettier
   mutate(
     City = toTitleCase(tolower(CityName)),
     Tenure = toTitleCase(tolower(PropertyStatus)),
     .keep = "unused"
   ) |>
+  # clean up name
   mutate(
     City = case_when(
       City == "Daajing Giids (Queen Charlotte)" ~ "Daajing Giids",
@@ -86,9 +96,11 @@ lands_report <- read_xlsx(
   ) |>
   mutate(
     Identifier = PropertyCode,
+    # replace blanks with NA values
     PrimaryUse = na_if(PrimaryUse, " "),
     StrategicClassification = na_if(StrategicClassification, " ")
   ) |>
+  # Add columns to line up with building_report
   mutate(FacilityType = "Land", UsableArea = NA) |>
   select(
     Identifier,
@@ -107,8 +119,10 @@ lands_report <- read_xlsx(
     Longitude
   )
 
+# join both reports together
 Facility_Table <- rbind(buildings_report, lands_report)
 
+# setup for geocoding to get standardized addresses
 AddressList <- Facility_Table |>
   select(
     LinkAddress = Address,

@@ -121,7 +121,6 @@ pwor <- read_xlsx(
     )
   )
 
-test <- pwor |> filter(BuildingRentableArea > TotalRentableArea)
 write.csv(
   pwor,
   here("PBI/data/R_ProvWideOccupancy_Table.csv"),
@@ -156,6 +155,7 @@ car <- rbind(car20_22, car22_24, car24_26) |>
     AgreementStatus = `Agr Status`,
     FiscalYear = `Fiscal Year`,
     AgreementType = `Agreement Type`,
+    Lease,
     LeaseStart = `Lease Start`,
     LeaseExpiry = `Lease Expiry`,
     AgreementDurationEndDate = `Agreement Duration End Date`,
@@ -191,7 +191,17 @@ car <- rbind(car20_22, car22_24, car24_26) |>
     LandArea = LandArea.x,
     BuildingRentableArea = BuildingRentableArea.x
   ) |>
+  # Address in R_Facility_Table
   filter(!is.na(Address)) |>
+  # Remove any leases that aren't strategic
+  # This only seems to remove leases associated with buildings in the owned portfolio.
+  # Usually parking only but sometimes building as well.
+  # filter(
+  #   !grepl("^L", Lease) |
+  #     Address %in% c("4000 Seymour Pl", "4001 Seymour Pl", "1011 4th Ave")
+  # ) |>
+  filter(AgreementStatus == "Active") |>
+  filter(AgreementType != "Non Prop") |>
   mutate(across(
     BuildingRentableArea:AnnualCharge,
     ~ as.numeric(gsub(
@@ -203,89 +213,6 @@ car <- rbind(car20_22, car22_24, car24_26) |>
   group_by(Identifier, Name, Address, City, FiscalYear) |>
   summarise(across(BuildingRentableArea:AnnualCharge, ~ sum(., na.rm = TRUE)))
 
-
-colnames(car)
-
-###############################
-car <- read_xlsx(
-  here(
-    "data/csr0001-2025-03-11113053.016.xlsx"
-  )
-) |>
-  rename(
-    Identifier = Location,
-    ParticipatesInPAM = `Participates In PAM`,
-    UploadCharges = `Upload Charges`,
-    AgreementNumber = `Agreement #`,
-    AgreementStatus = `Agr Status`,
-    CAR_FiscalYear = `Fiscal Year`,
-    AgreementType = `Agreement Type`,
-    LeaseStart = `Lease Start`,
-    LeaseExpiry = `Lease Expiry`,
-    AgreementDurationEndDate = `Agreement Duration End Date`,
-    BuildingMetricRentableArea = `Rentable Area - Building metric`,
-    BuildingMetricAppropriatedArea = `Appropriated Area - Building metric`,
-    BuildingMetricBillableArea = `Billable Area - Building metric`,
-    LandMetricArea = `Area - Land metric`,
-    LandMetricAppropriatedArea = `Appropriated Area - Land metric`,
-    LandMetricBillableArea = `Billable Area - Land metric`,
-    ParkingTotalStalls = `Total Parking Stalls`,
-    ParkingAppropriatedArea = `Appropriated Area - Parking`,
-    ParkingBillableStalls = `Billable Parking Stalls`,
-    BaseRent = `Base rent`,
-    OMTotal = `O&M Total`,
-    OM = `O&M`,
-    LLOM = `LL O&M`,
-    OMAdmin = `O&M Admin`,
-    PrkCost = `Prk Cost`,
-    LLAdmin = `LL Admin`,
-    UtilAdmin = `Util Admin`,
-    TaxAdmin = `Tax Admin`,
-    TotalAdmin = `Total Admin`,
-    AdminFee = `Admin Fee`,
-    AnnualCharge = `Annual Charge`
-  ) |>
-  select(
-    -c(
-      ParticipatesInPAM,
-      UploadCharges,
-      Description,
-      AgreementDurationEndDate
-    )
-  ) |>
-  mutate(across(
-    BuildingMetricRentableArea:AnnualCharge,
-    ~ as.numeric(gsub(
-      "[^0-9.-]",
-      "",
-      .x
-    ))
-  )) |>
-  rename(City.x = City, Address.x = Address) |>
-  left_join(
-    R_Facility_Table,
-    by = join_by(
-      Identifier
-    )
-  ) |>
-  # 4000 & 4001 Seymour and 1011 4th Ave aren't filtered or don't exist in table
-  filter(!grepl("^L", Lease)) |>
-  filter(AgreementStatus == "Active") |>
-  filter(AgreementType != "Non Prop") |>
-  filter(!is.na(Address)) |>
-  select(-c(Address.x, City.x)) |>
-  rename(
-    FiscalYear = CAR_FiscalYear
-  ) |>
-  relocate(
-    Identifier,
-    Name,
-    Address,
-    City,
-    .before = everything()
-  ) |>
-  select(-c(PropertyCode:GeoPrecision))
-
 write.csv(
   car,
   here("PBI/Data/R_CustomerAgreementReport.csv"),
@@ -293,10 +220,12 @@ write.csv(
 )
 
 # Fiscal table ####
+# Only most current year appears to be available. Not sure reliability or what is in 2526 year
 fiscal <- read_xlsx(
   here(
     #"data/ho-rplm-contract-by-fiscal-by-component-2025-03-25092941.451.xlsx"
-    "data/contract-by-fiscal-by-component-2025-04-30.xlsx"
+    # "data/contract-by-fiscal-by-component-2025-04-30.xlsx"
+    "data/contract-by-fiscal-by-component-23-25-2025-05-05.xlsx"
   ),
   start_row = 3
 ) |>
@@ -314,7 +243,7 @@ fiscal <- read_xlsx(
       .x
     ))
   )) |>
-  # test <- fiscal |> filter(PrimaryLocation != Identifier)
+  # test <- fiscal |> filter(ContractName != Identifier)
   # test <- fiscal |> select(Identifier) |> distinct() |>
   left_join(R_Facility_Table, by = join_by(Identifier)) |>
   filter(!is.na(Address)) |>
@@ -419,9 +348,7 @@ write.csv(
   row.names = FALSE
 )
 
-# zoning ####
 # check for vacant land ####
-
 vacant_land <- read_xlsx(
   here("data/PMR3678-Active-Land-No-Active-Buildings.xlsx"),
   start_row = 3
@@ -442,7 +369,6 @@ vacant_land <- read_xlsx(
   filter(OccupancyStatus == "VACANT")
 
 # Zoning ####
-
 zoning_buildings <- read_xlsx(here("data/RPD_Buildings_Zoning.xlsx")) |>
   filter(
     Tenure == "Owned" |
@@ -541,5 +467,93 @@ workorders <- read.csv(here("data/WO Detail List_Full Data_data.csv")) |>
 write.csv(
   workorders,
   here("PBI/Data/R_WorkOrders_Table.csv"),
+  row.names = FALSE
+)
+
+# Climate Risk ####
+climate <- read_xlsx(
+  here("data/RPD Building Climate Risk Scores.xlsx"),
+  start_row = 2
+) |>
+  rename_with(~ gsub("_", "", .), .cols = everything()) |>
+  rename_with(~ gsub(" ", "", .), .cols = everything()) |>
+  rename_with(~ gsub("-", "", .), .cols = everything()) |>
+  select(-c(OBJECTID, Address, City, PostalCode)) |>
+  rename(
+    Location = LOCATION,
+    LastUpdate = lastupdate,
+    Identifier = BuildingNumber,
+    SiteCode = ComplexNumber,
+    PropertyCode = LandNumber
+  ) |>
+  left_join(R_Facility_Table, by = join_by(Identifier)) |>
+  filter(!is.na(Address)) |>
+  relocate(Name, Address, City, .after = Identifier) |>
+  select(-c(PropertyCode.y:GeoPrecision)) |>
+  rename_with(~ gsub("\\.x", "", .), .cols = everything())
+
+write.csv(
+  climate,
+  here("PBI/Data/R_ClimateRisk_Table.csv"),
+  row.names = FALSE
+)
+
+# @Real Data ####
+
+tripaymentlineitem <- read_xlsx(here(
+  "data/T_TRIPAYMENTLINEITEM Owned Property PLI's May 5 2025.xlsx"
+))
+
+tripay <- tripaymentlineitem |>
+  select(
+    -c(
+      TRIIDTX,
+      AREARESNUMBERNU,
+      ARENALEASEPAYMENTLI,
+      TRISTATUSCL,
+      TRISTATUSCLOBJID,
+      T1_1091_OBJID,
+      T1_SPEC_ID,
+      T1_SYS_GUIID,
+      TRICURRENCYUO,
+      SYS_TYPE1,
+      AREPAYMENTSCHEDULETYPE
+    )
+  ) |>
+  rename_with(~ toTitleCase(tolower(.)), .cols = everything()) |>
+  filter(Trinametx != "*NONPROP") |>
+  mutate(
+    PaidDate = as.Date(Areactualduedate, format = "%d-%b-%Y"),
+    .after = Trinametx
+  ) |>
+  filter(PaidDate > "2020-03-31") |>
+  rename(
+    Identifier = Trinametx,
+    PaymentType = Tripaymenttypecl,
+    AmountPaid = Triactualamountnu,
+    OrgPaid = Triremittoorganization
+  ) |>
+  mutate(
+    FiscalYear = case_when(
+      PaidDate |> timetk::between_time('2024-04-01', '2025-03-31') ~ "FY2425",
+      PaidDate |> timetk::between_time('2023-04-01', '2024-03-31') ~ "FY2324",
+      PaidDate |> timetk::between_time('2022-04-01', '2023-03-31') ~ "FY2223",
+      PaidDate |> timetk::between_time('2021-04-01', '2022-03-31') ~ "FY2122",
+      PaidDate |> timetk::between_time('2020-04-01', '2021-03-31') ~ "FY2021"
+    ),
+    .after = PaidDate
+  ) |>
+  group_by(Identifier, FiscalYear, PaymentType) |>
+  summarise(TotalPaid = sum(AmountPaid)) |>
+  ungroup() |>
+  filter(PaymentType %in% c("O&M Total", "Utilities")) |>
+  left_join(R_Facility_Table, by = join_by(Identifier)) |>
+  relocate(Name, Address, City, FacilityType, .after = Identifier) |>
+  select(-c(PropertyCode:GeoPrecision)) |>
+  filter(!is.na(Address))
+
+write.csv(
+  tripay,
+  here("PBI/Data/R_OMnUtilities_Table.csv"),
   row.names = FALSE
 )
