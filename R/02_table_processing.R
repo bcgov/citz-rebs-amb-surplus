@@ -151,6 +151,7 @@ car20_22 <- read_xlsx(
 car <- rbind(car20_22, car22_24, car24_26) |>
   select(
     Identifier = Location,
+    Client,
     AgreementNumber = `Agreement #`,
     AgreementStatus = `Agr Status`,
     FiscalYear = `Fiscal Year`,
@@ -210,8 +211,19 @@ car <- rbind(car20_22, car22_24, car24_26) |>
       .x
     ))
   )) |>
-  group_by(Identifier, Name, Address, City, FiscalYear) |>
-  summarise(across(BuildingRentableArea:AnnualCharge, ~ sum(., na.rm = TRUE)))
+  # group_by(Identifier, Name, Address, City, FiscalYear) |>
+  # summarise(across(BuildingRentableArea:AnnualCharge, ~ sum(., na.rm = TRUE)))
+  select(
+    Identifier,
+    Name,
+    Address,
+    City,
+    FiscalYear,
+    Client,
+    AgreementType,
+    AgreementNumber,
+    BuildingRentableArea:AnnualCharge
+  )
 
 write.csv(
   car,
@@ -339,8 +351,28 @@ ProjectCosts <- rbind(ProjectCostsCBRE, ProjectCostsWDS) |>
   ) |>
   left_join(R_Facility_Table, by = join_by(Identifier)) |>
   filter(!is.na(Address)) |>
-  select(Identifier, Name, Address, City, Region, N_Projects, Total_Paid) |>
-  mutate(Total_Paid = round(Total_Paid, digits = 2))
+  select(
+    Identifier,
+    Name,
+    Address,
+    City,
+    Region,
+    N_Projects,
+    Total_Paid,
+    BuildingRentableArea,
+    LandArea
+  ) |>
+  mutate(Total_Paid = round(Total_Paid, digits = 2)) |>
+  mutate(
+    CostPerSqM = case_when(
+      startsWith(Identifier, "B") ~ Total_Paid / BuildingRentableArea,
+      .default = NA
+    ),
+    CostPerHA = case_when(
+      startsWith(Identifier, "N") ~ Total_Paid / LandArea,
+      .default = NA
+    )
+  )
 
 write.csv(
   ProjectCosts,
