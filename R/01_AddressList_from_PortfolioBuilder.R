@@ -233,6 +233,54 @@ R_Facility_Table <- Facility_Table |>
     GeoPrecision = first(GeoPrecision, na_rm = TRUE)
   )
 
+zoning_buildings <- read_xlsx(here("data/RPD_Buildings_Zoning.xlsx")) |>
+  filter(
+    Tenure == "Owned" |
+      Address %in% c("4000 Seymour Pl", "4001 Seymour Pl", "1011 4th Ave")
+  ) |>
+  select(
+    Identifier = Building_Number,
+    ZoneCode = ZONE_CODE,
+    ZoneClass = ZONE_CLASS,
+    ParcelName = PARCEL_NAME,
+    ParcelStatus = PARCEL_STATUS,
+    PlanNumber = PLAN_NUMBER,
+    PID,
+    PIN,
+    RegionalDistrict = REGIONAL_DISTRICT
+  ) |>
+  left_join(R_Facility_Table, by = join_by(Identifier)) |>
+  relocate(Name, Address, City, .after = Identifier) |>
+  select(-c(PropertyCode:GeoPrecision))
+
+zoning_lands <- read_xlsx(here("data/RPD_Land_Zoning.xlsx")) |>
+  filter(
+    Tenure == "Owned" |
+      Address %in% c("4000 Seymour Pl", "4001 Seymour Pl", "1011 4th Ave")
+  ) |>
+  select(
+    Identifier = Land_Number,
+    ZoneCode = ZONE_CODE,
+    ZoneClass = ZONE_CLASS,
+    ParcelName = PARCEL_NAME,
+    ParcelStatus = PARCEL_STATUS,
+    PlanNumber = PLAN_NUMBER,
+    PID,
+    PIN,
+    RegionalDistrict = REGIONAL_DISTRICT
+  ) |>
+  left_join(R_Facility_Table, by = join_by(Identifier)) |>
+  relocate(Name, Address, City, .after = Identifier) |>
+  select(-c(PropertyCode:GeoPrecision))
+
+zoning <- rbind(zoning_buildings, zoning_lands) |>
+  select(Identifier, RegionalDistrict) |>
+  distinct()
+
+R_Facility_Table <- R_Facility_Table |>
+  left_join(zoning, by = join_by(Identifier)) |>
+  relocate(RegionalDistrict, .after = City)
+
 write.csv(
   R_Facility_Table,
   here("PBI/data/R_Facility_Table.csv"),

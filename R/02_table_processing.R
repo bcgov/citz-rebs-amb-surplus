@@ -260,7 +260,8 @@ fiscal <- read_xlsx(
   left_join(R_Facility_Table, by = join_by(Identifier)) |>
   filter(!is.na(Address)) |>
   relocate(Name, Address, City, .after = Identifier) |>
-  select(-c(PropertyCode:GeoPrecision))
+  select(-c(PropertyCode:GeoPrecision)) |>
+  select(Identifier:City, FY2425OM:FY2425LLOM, FY2425TotalCost)
 
 write.csv(
   fiscal,
@@ -414,7 +415,8 @@ zoning_buildings <- read_xlsx(here("data/RPD_Buildings_Zoning.xlsx")) |>
     ParcelStatus = PARCEL_STATUS,
     PlanNumber = PLAN_NUMBER,
     PID,
-    PIN
+    PIN,
+    RegionalDistrict = REGIONAL_DISTRICT
   ) |>
   left_join(R_Facility_Table, by = join_by(Identifier)) |>
   relocate(Name, Address, City, .after = Identifier) |>
@@ -433,7 +435,8 @@ zoning_lands <- read_xlsx(here("data/RPD_Land_Zoning.xlsx")) |>
     ParcelStatus = PARCEL_STATUS,
     PlanNumber = PLAN_NUMBER,
     PID,
-    PIN
+    PIN,
+    RegionalDistrict = REGIONAL_DISTRICT
   ) |>
   left_join(R_Facility_Table, by = join_by(Identifier)) |>
   relocate(Name, Address, City, .after = Identifier) |>
@@ -448,7 +451,6 @@ write.csv(
 )
 
 # Work Orders ####
-
 workorders <- read.csv(here("data/WO Detail List_Full Data_data.csv")) |>
   select(
     Identifier = `Property.ID`,
@@ -582,7 +584,8 @@ tripay <- tripaymentlineitem |>
   left_join(R_Facility_Table, by = join_by(Identifier)) |>
   relocate(Name, Address, City, FacilityType, .after = Identifier) |>
   select(-c(PropertyCode:GeoPrecision)) |>
-  filter(!is.na(Address))
+  filter(!is.na(Address)) |>
+  pivot_wider(names_from = PaymentType, values_from = TotalPaid)
 
 write.csv(
   tripay,
