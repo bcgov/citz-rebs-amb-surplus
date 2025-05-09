@@ -85,38 +85,86 @@ pwor <- read_xlsx(
     City,
     .before = everything()
   ) |>
+  mutate(
+    TotalRentableLandArea = case_when(
+      UOM == "M2" ~ NA,
+      .default = TotalRentableArea
+    ),
+    TotalRentableBuildingArea = case_when(
+      UOM == "HA" ~ NA,
+      .default = TotalRentableArea
+    ),
+    InventoryAllocatedRentableLandArea = case_when(
+      UOM == "M2" ~ NA,
+      .default = InventoryAllocatedRentableArea
+    ),
+    InventoryAllocatedRentableBuildingArea = case_when(
+      UOM == "HA" ~ NA,
+      .default = InventoryAllocatedRentableArea
+    ),
+    .before = TotalRentableArea
+  ) |>
   select(
     Identifier,
     Name,
     Address,
     City,
-    TotalRentableArea,
-    InventoryAllocatedRentableArea,
-    BuildingRentableArea,
+    CustomerCategory,
+    Division,
+    Department,
+    UOM,
+    TotalRentableLandArea,
+    InventoryAllocatedRentableLandArea,
+    TotalRentableBuildingArea,
+    InventoryAllocatedRentableBuildingArea,
     UsableArea,
     LandArea
   ) |>
+  mutate(
+    CustomerCategory = case_when(
+      Department %in% c("RPD VACANT SPACE", "Vacancy") ~ "Vacant",
+      .default = CustomerCategory
+    )
+  ) |>
+  filter(!CustomerCategory == "Vacant") |>
   group_by(Identifier) |>
   summarise(
     Name = first(Name),
     Address = first(Address),
     City = first(City),
-    TotalRentableArea = first(TotalRentableArea, na_rm = TRUE),
-    AllocatedRentableArea = sum(InventoryAllocatedRentableArea, na.rm = TRUE),
-    BuildingRentableArea = first(BuildingRentableArea),
-    UsableArea = first(UsableArea),
-    LandArea = first(LandArea)
+    TotalRentableLandArea = first(TotalRentableLandArea, na_rm = TRUE),
+    ,
+    InventoryAllocatedRentableLandArea = sum(
+      InventoryAllocatedRentableLandArea,
+      na.rm = TRUE
+    ),
+    TotalRentableBuildingArea = first(TotalRentableBuildingArea, na_rm = TRUE),
+    ,
+    InventoryAllocatedRentableBuildingArea = sum(
+      InventoryAllocatedRentableBuildingArea,
+      na.rm = TRUE
+    )
   ) |>
   ungroup() |>
   mutate(
-    AllocatedRentableArea = case_when(
-      AllocatedRentableArea > TotalRentableArea ~ TotalRentableArea,
-      .default = AllocatedRentableArea
+    InventoryAllocatedRentableLandArea = case_when(
+      InventoryAllocatedRentableLandArea > TotalRentableLandArea ~
+        TotalRentableLandArea,
+      .default = InventoryAllocatedRentableLandArea
+    ),
+    InventoryAllocatedRentableBuildingArea = case_when(
+      InventoryAllocatedRentableBuildingArea > TotalRentableBuildingArea ~
+        TotalRentableBuildingArea,
+      .default = InventoryAllocatedRentableBuildingArea
     )
   ) |>
   mutate(
-    AllocationPercentage = round(
-      AllocatedRentableArea / TotalRentableArea,
+    AllocationPercentageLand = round(
+      InventoryAllocatedRentableLandArea / TotalRentableLandArea,
+      digits = 2
+    ),
+    AllocationPercentageBuilding = round(
+      InventoryAllocatedRentableBuildingArea / TotalRentableBuildingArea,
       digits = 2
     )
   )
@@ -383,7 +431,8 @@ write.csv(
 
 # check for vacant land ####
 vacant_land <- read_xlsx(
-  here("data/PMR3678-Active-Land-No-Active-Buildings.xlsx"),
+  # here("data/PMR3678-Active-Land-No-Active-Buildings.xlsx"),
+  here("data/pmr3678-active-lands-no-buildings-2025-05-09.xlsx"),
   start_row = 3
 ) |>
   fill(`City ID`, .direction = "down") |>
@@ -399,7 +448,8 @@ vacant_land <- read_xlsx(
   filter(!is.na(Address)) |>
   filter(!is.na(LandName)) |>
   filter(Tenure == "OWNED") |>
-  filter(OccupancyStatus == "VACANT")
+  filter(OccupancyStatus == "VACANT") |>
+  left_join(R_Facility_Table, by = join_by(LandName == Identifier))
 
 # Zoning ####
 zoning_buildings <- read_xlsx(here("data/RPD_Buildings_Zoning.xlsx")) |>

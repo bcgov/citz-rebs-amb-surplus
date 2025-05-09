@@ -8,6 +8,7 @@ library(tidyr)
 library(tools)
 
 options(scipen = 999)
+options(digits = 22)
 # Portfolio Reports Processing ####
 
 # From Archibus, Report Builders, Portfolio Report Builders, grab the buildings tab
@@ -280,6 +281,24 @@ zoning <- rbind(zoning_buildings, zoning_lands) |>
 R_Facility_Table <- R_Facility_Table |>
   left_join(zoning, by = join_by(Identifier)) |>
   relocate(RegionalDistrict, .after = City)
+
+LandGeo <- R_Facility_Table |>
+  select(Identifier, PropertyCode, Latitude, Longitude) |>
+  filter(!is.na(PropertyCode)) |>
+  filter(!startsWith(Identifier, "N")) |>
+  group_by(PropertyCode) |>
+  summarise(Lat = first(Latitude), Lon = first(Longitude))
+
+R_Facility_Table <- R_Facility_Table |>
+  left_join(LandGeo, by = join_by(Identifier == PropertyCode)) |>
+  mutate(
+    Latitude = case_when(is.na(Latitude) ~ Lat, .default = Latitude),
+    Longitude = case_when(is.na(Longitude) ~ Lon, .default = Longitude)
+  ) |>
+  select(-c(Lat, Lon)) |>
+  group_by(Address) |>
+  fill(Latitude, Longitude, .direction = "downup") |>
+  ungroup()
 
 write.csv(
   R_Facility_Table,
