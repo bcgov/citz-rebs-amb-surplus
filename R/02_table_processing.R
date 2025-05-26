@@ -642,3 +642,66 @@ write.csv(
   here("PBI/Data/R_OMnUtilities_Table.csv"),
   row.names = FALSE
 )
+
+# Contaminated Sites ####
+
+csites <- read_xlsx(
+  here("data/Contaminated_sites_inventory_April_2025.xlsx"),
+  sheet = "Apr 2025"
+)
+
+contaminated_building <- csites |>
+  rename_with(~ gsub(" ", "", .), .cols = everything()) |>
+  filter(
+    BuildingTenure == "Owned" |
+      LandTenure == "Owned" |
+      BuildingAddress %in%
+        c("4000 Seymour Pl", "4001 Seymour Pl", "1011 4th Ave")
+  ) |>
+  select(
+    -c(
+      City,
+      BuildingRentableArea,
+      BuildingDescription,
+      BuildingAddress,
+      LandArea,
+      LandDescription,
+      LandAddress
+    )
+  ) |>
+  mutate(
+    Building = case_when(
+      nchar(Building) == 7 ~ paste0("B", Building),
+      nchar(Building) == 6 ~ paste0("B0", Building),
+      nchar(Building) == 5 ~ paste0("B00", Building)
+    )
+  ) |>
+  left_join(R_Facility_Table, by = join_by(Building == Identifier)) |>
+  filter(!is.na(Name)) |>
+  select(-c(Land, LandTenure, BuildingTenure, `Ministry/Non-Ministry`)) |>
+  rename(
+    Identifier = Building,
+    SiteInvestigated = `SiteInvestigated?-ReportAvailable`,
+    ContaminationStatus = `IsSiteContaminated?`,
+    StatusOfRemediation = StatusofRemediation
+  ) |>
+  relocate(Name, Address, City, .after = Identifier) |>
+  select(-c(AddressEdit:GeoPrecision)) |>
+  mutate(
+    SiteInvestigated = case_when(
+      SiteInvestigated == "no" ~ "No",
+      SiteInvestigated == "sample" ~ "Sample",
+      .default = SiteInvestigated
+    ),
+    ContaminationStatus = case_when(
+      ContaminationStatus == "no" ~ "No",
+      ContaminationStatus == "yes" ~ "Yes",
+      ContaminationStatus == "unknown" ~ "Unknown",
+      .default = ContaminationStatus
+    )
+  )
+
+write.csv(
+  contaminated_building,
+  here("PBI/data/R_Contaminated_Buildings_Table.csv")
+)
