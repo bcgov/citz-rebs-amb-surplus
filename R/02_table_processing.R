@@ -67,7 +67,7 @@ pwor <- read_xlsx(
   filter(
     Tenure == "OWNED" |
       Address %in%
-        c("4000 Seymour Pl", "4001 Seymour Pl", "1011 4th Avenue") # Strategic Leases
+        c("4000 Seymour Pl", "4001 Seymour Pl", "1011 4th Ave") # Strategic Leases
   ) |>
   select(-c(City, Address)) |>
   left_join(R_Facility_Table, by = join_by(Identifier)) |>
@@ -174,6 +174,12 @@ write.csv(
   here("PBI/data/R_ProvWideOccupancy_Table.csv"),
   row.names = FALSE
 )
+
+# test <- pwor |>
+#   select(Identifier) |>
+#   mutate(pwor = "Yes") |>
+#   right_join(R_Facility_Table, by = join_by(Identifier)) |>
+#   filter(is.na(pwor))
 
 # Customer Agreement Report ####
 car24_26 <- read_xlsx(
