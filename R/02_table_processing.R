@@ -711,3 +711,198 @@ write.csv(
   contaminated_building,
   here("PBI/data/R_Contaminated_Buildings_Table.csv")
 )
+
+
+# Make Ratings Table ####
+R_Facility_Bridge_Table <- read.csv(here(
+  "PBI/data/R_Bridge_Address_Table.csv"
+)) |>
+  rename(AddressEdit = Address)
+
+R_HQ_Telework_Table <- read.csv(here("PBI/data/R_HQ_Telework_Table.csv"))
+utilization <- R_HQ_Telework_Table |>
+  filter(DaysInOfficePresumed != "" & FTECount > 0) |>
+  group_by(Address) |>
+  summarise(
+    FTECountPerAddress = sum(FTECount),
+    DaysInOfficePresumed = sum(DaysInOfficePresumed)
+  ) |>
+  ungroup() |>
+  mutate(AvgDaysInOffice = DaysInOfficePresumed / 5) |>
+  mutate(InPersonPct = AvgDaysInOffice / FTECountPerAddress) |>
+  left_join()
+
+pwor_building <- read.csv(here("PBI/data/R_ProvWideOccupancy_Table.csv")) |>
+  select(Identifier, TotalRentableBuildingArea)
+
+ratings <- R_Facility_Table |>
+  select(
+    Identifier,
+    Name,
+    Address,
+    City,
+    PrimaryUse,
+    FacilityType,
+    FacilityBuildingRentableArea = BuildingRentableArea
+  ) |>
+  filter(startsWith(Identifier, "B")) |>
+  left_join(vfa, join_by(Identifier, Name, Address, City)) |>
+  left_join(
+    fiscal,
+    join_by(Identifier, Name, Address, City)
+  ) |>
+  select(
+    Identifier,
+    Name,
+    Address,
+    City,
+    PrimaryUse,
+    FacilityBuildingRentableArea,
+    Fci,
+    FY2425TotalCost
+  ) |>
+  mutate(
+    BuildingCategory = case_when(
+      PrimaryUse %in% c("Office", "Trailer Office", "Yard Office") ~ "Office",
+      PrimaryUse %in% c("Courthouse") ~ "Courthouse",
+      PrimaryUse %in% c("Jail") ~ "Jail",
+      PrimaryUse %in%
+        c("Storage Open", "Storage Small", "Storage Vehicle", "Warehouse") ~
+        "Storage",
+      PrimaryUse %in% c("Ambulance", "Health Unit", "Laboratory") ~ "Health",
+      PrimaryUse %in%
+        c(
+          "Residential Detached",
+          "Residential Multi",
+          "Dormitory",
+          "Mobile Home"
+        ) ~
+        "Residential",
+      .default = "Other"
+    ),
+    .after = PrimaryUse
+  ) |>
+  left_join(pwor_building, by = join_by(Identifier)) |>
+  mutate(
+    BuildingRentableArea = case_when(
+      is.na(TotalRentableBuildingArea) ~ FacilityBuildingRentableArea,
+      .default = TotalRentableBuildingArea
+    )
+  ) |>
+  select(-c(TotalRentableBuildingArea, FacilityBuildingRentableArea)) |>
+  mutate(
+    ConditionRating = case_when(
+      Fci <= 0.2 ~ "Excellent",
+      Fci <= 0.4 ~ "Good",
+      Fci <= 0.6 ~ "Fair",
+      Fci <= 0.8 ~ "Poor",
+      Fci > 0.8 ~ "Dire",
+      is.na(Fci) ~ "Fair"
+    ),
+    .after = Fci
+  ) |>
+  mutate(
+    CostPerSqM = FY2425TotalCost / BuildingRentableArea,
+    .after = FY2425TotalCost
+  ) |>
+  group_by(BuildingCategory) |>
+  mutate(
+    percentile = percent_rank(CostPerSqM),
+    FinancialRating = case_when(
+      percentile <= 0.20 ~ "Excellent",
+      percentile <= 0.40 ~ "Good",
+      percentile <= 0.60 ~ "Fair",
+      percentile <= 0.80 ~ "Poor",
+      percentile > 0.80 ~ "Dire",
+      is.na(percentile) ~ "Fair"
+    ),
+    .after = CostPerSqM
+  ) |>
+  ungroup() |>
+  left_join(utilization, by = join_by(Address)) |>
+  group_by(BuildingCategory) |>
+  mutate(
+    UtilizationRating = case_when(
+      InPersonPct <= 0.20 ~ "Dire",
+      InPersonPct <= 0.40 ~ "Poor",
+      InPersonPct <= 0.60 ~ "Fair",
+      InPersonPct <= 0.80 ~ "Good",
+      InPersonPct > 0.80 ~ "Excellent",
+      is.na(InPersonPct) ~ "Fair"
+    ),
+    .after = InPersonPct
+  ) |>
+  ungroup() |>
+  mutate(
+    ConditionScore = case_when(
+      ConditionRating == "Dire" ~ 1,
+      ConditionRating == "Poor" ~ 2,
+      ConditionRating == "Fair" ~ 3,
+      ConditionRating == "Good" ~ 4,
+      ConditionRating == "Excellent" ~ 5,
+      is.na(ConditionRating) ~ 3,
+      TRUE ~ 3
+    ),
+    FinancialScore = case_when(
+      FinancialRating == "Dire" ~ 1,
+      FinancialRating == "Poor" ~ 2,
+      FinancialRating == "Fair" ~ 3,
+      FinancialRating == "Good" ~ 4,
+      FinancialRating == "Excellent" ~ 5,
+      is.na(FinancialRating) ~ 3,
+      TRUE ~ 3
+    ),
+    UtilizationScore = case_when(
+      UtilizationRating == "Dire" ~ 1,
+      UtilizationRating == "Poor" ~ 2,
+      UtilizationRating == "Fair" ~ 3,
+      UtilizationRating == "Good" ~ 4,
+      UtilizationRating == "Excellent" ~ 5,
+      is.na(UtilizationRating) ~ 3,
+      TRUE ~ 3
+    )
+  ) |>
+  rowwise() |>
+  mutate(
+    OverallScore = sum(ConditionScore, FinancialScore, UtilizationScore)
+  ) |>
+  ungroup() |>
+  group_by(Address) |>
+  mutate(
+    TotalPropertyRentableArea = sum(BuildingRentableArea, na.rm = TRUE),
+    .after = BuildingRentableArea
+  ) |>
+  ungroup() |>
+  mutate(
+    WeightedAssetScore = OverallScore *
+      (BuildingRentableArea / TotalPropertyRentableArea)
+  ) |>
+  group_by(Address) |>
+  mutate(PropertyWeightedScore = sum(WeightedAssetScore)) |>
+  ungroup() |>
+  mutate(
+    OverallRating = case_when(
+      OverallScore <= 5.4 ~ "Dire",
+      OverallScore <= 7.8 ~ "Poor",
+      OverallScore <= 10.2 ~ "Fair",
+      OverallScore <= 12.6 ~ "Good",
+      OverallScore <= 15 ~ "Excellent"
+    ),
+    .after = OverallScore
+  )
+
+rankset <- ratings |>
+  select(Address, PropertyWeightedScore) |>
+  group_by(Address) |>
+  slice(1) |>
+  ungroup() |>
+  arrange(PropertyWeightedScore) |>
+  mutate(Rank = rank(PropertyWeightedScore, ties.method = "min"))
+
+ratingsFinal <- ratings |>
+  left_join(rankset, by = join_by(Address, PropertyWeightedScore))
+
+test <- ratingsFinal |>
+  filter(is.na(BuildingRentableArea))
+
+write.csv(ratings, here("PBI/data/R_Ratings_Table.csv"), row.names = FALSE)
