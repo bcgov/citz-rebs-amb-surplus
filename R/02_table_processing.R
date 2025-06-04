@@ -326,50 +326,40 @@ write.csv(
 # VFA Data ####
 vfa <- read_xlsx(
   here(
-    "data/Asset List.xlsx"
+    # "data/Asset List.xlsx"
+    "data/VFA FCI June.xlsx"
   )
 ) |>
-  rename_with(str_to_title, everything()) |>
-  filter(!grepl("Archive", Regionname)) |> # remove values marked as archived.
-  select(-c(Region_is_archived)) |>
-  filter(!grepl("^x", Assetnumber)) |> # some archived values have x or xx for Assetnumber
-  mutate(
-    Assetnumber = case_when(
-      Assetnumber == "N2000527 / N2000497" ~ "N2000527",
-      .default = Assetnumber
-    ),
-    Assetname = case_when(
-      Assetname == "St Ann's Site" ~ "St Ann's Site N2000527 and N2000497",
-      .default = Assetname
-    )
-  ) |>
-  left_join(R_Facility_Table, by = join_by(Assetnumber == Identifier)) |>
-  filter(!is.na(Address)) |>
   select(
-    Identifier = Assetnumber,
+    AssetNumber = `Asset - Number`,
+    City = `Asset - City`,
+    FCI = `Asset - FCI`,
+    Address = `Asset - Address 1`
+  ) |>
+  # rename_with(str_to_title, everything()) |>
+  # filter(!grepl("Archive", Regionname)) |> # remove values marked as archived.
+  # select(-c(Region_is_archived)) |>
+  # filter(!grepl("^x", Assetnumber)) |> # some archived values have x or xx for Assetnumber
+  mutate(
+    AssetNumber = case_when(
+      AssetNumber == "N2000527 / N2000497" ~ "N2000527",
+      .default = AssetNumber
+    )
+    # ,
+    # Assetname = case_when(
+    #   Assetname == "St Ann's Site" ~ "St Ann's Site N2000527 and N2000497",
+    #   .default = Assetname
+    # )
+  ) |>
+  left_join(R_Facility_Table, by = join_by(AssetNumber == Identifier)) |>
+  select(
+    Identifier = AssetNumber,
     Name,
-    Address,
-    City,
-    Regioneid,
-    Regionname,
-    Campuseid,
-    Campusname,
-    Asseteid,
-    Assetname,
-    Assetsize,
-    Replacementvalue,
-    Use,
-    YearConstructed = `Year Constructed`,
-    Age,
-    Fci,
-    FciCost = Fcicost,
-    Currency,
-    AssetUnit = Assetunit,
-    AssetType = Assettype,
-    Ri,
-    RiCost = Ricost,
-    AssetCostUnit = Asset_costunit
-  )
+    Address = Address.y,
+    City = City.y,
+    FCI
+  ) |>
+  filter(!is.na(Address))
 
 write.csv(
   vfa,
@@ -575,8 +565,8 @@ climate <- read_xlsx(
     Identifier = BuildingNumber,
     SiteCode = ComplexNumber,
     PropertyCode = LandNumber
-  ) |>
-  left_join(R_Facility_Table, by = join_by(Identifier)) |>
+  ) #|>
+left_join(R_Facility_Table, by = join_by(Identifier)) |>
   filter(!is.na(Address)) |>
   relocate(Name, Address, City, .after = Identifier) |>
   select(-c(PropertyCode.y:GeoPrecision)) |>
@@ -720,6 +710,11 @@ R_Facility_Bridge_Table <- read.csv(here(
   rename(AddressEdit = Address)
 
 R_HQ_Telework_Table <- read.csv(here("PBI/data/R_HQ_Telework_Table.csv"))
+
+vfa <- read.csv(here("PBI/Data/R_VFATable.csv"))
+
+fiscal <- read.csv(here("PBI/Data/R_FiscalTable.csv"))
+
 utilization <- R_HQ_Telework_Table |>
   filter(DaysInOfficePresumed != "" & FTECount > 0) |>
   group_by(Address) |>
@@ -729,8 +724,7 @@ utilization <- R_HQ_Telework_Table |>
   ) |>
   ungroup() |>
   mutate(AvgDaysInOffice = DaysInOfficePresumed / 5) |>
-  mutate(InPersonPct = AvgDaysInOffice / FTECountPerAddress) |>
-  left_join()
+  mutate(InPersonPct = AvgDaysInOffice / FTECountPerAddress)
 
 pwor_building <- read.csv(here("PBI/data/R_ProvWideOccupancy_Table.csv")) |>
   select(Identifier, TotalRentableBuildingArea)
@@ -758,7 +752,7 @@ ratings <- R_Facility_Table |>
     City,
     PrimaryUse,
     FacilityBuildingRentableArea,
-    Fci,
+    FCI,
     FY2425TotalCost
   ) |>
   mutate(
@@ -792,14 +786,14 @@ ratings <- R_Facility_Table |>
   select(-c(TotalRentableBuildingArea, FacilityBuildingRentableArea)) |>
   mutate(
     ConditionRating = case_when(
-      Fci <= 0.2 ~ "Excellent",
-      Fci <= 0.4 ~ "Good",
-      Fci <= 0.6 ~ "Fair",
-      Fci <= 0.8 ~ "Poor",
-      Fci > 0.8 ~ "Dire",
-      is.na(Fci) ~ "Fair"
+      FCI <= 0.2 ~ "Excellent",
+      FCI <= 0.4 ~ "Good",
+      FCI <= 0.6 ~ "Fair",
+      FCI <= 0.8 ~ "Poor",
+      FCI > 0.8 ~ "Dire",
+      is.na(FCI) ~ "Fair"
     ),
-    .after = Fci
+    .after = FCI
   ) |>
   mutate(
     CostPerSqM = FY2425TotalCost / BuildingRentableArea,
@@ -902,7 +896,4 @@ rankset <- ratings |>
 ratingsFinal <- ratings |>
   left_join(rankset, by = join_by(Address, PropertyWeightedScore))
 
-test <- ratingsFinal |>
-  filter(is.na(BuildingRentableArea))
-
-write.csv(ratings, here("PBI/data/R_Ratings_Table.csv"), row.names = FALSE)
+write.csv(ratingsFinal, here("PBI/data/R_Ratings_Table.csv"), row.names = FALSE)
