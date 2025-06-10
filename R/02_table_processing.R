@@ -704,11 +704,6 @@ write.csv(
 
 
 # Make Ratings Table ####
-R_Facility_Bridge_Table <- read.csv(here(
-  "PBI/data/R_Bridge_Address_Table.csv"
-)) |>
-  rename(AddressEdit = Address)
-
 R_HQ_Telework_Table <- read.csv(here("PBI/data/R_HQ_Telework_Table.csv"))
 
 vfa <- read.csv(here("PBI/Data/R_VFATable.csv"))
@@ -727,7 +722,7 @@ utilization <- R_HQ_Telework_Table |>
   mutate(InPersonPct = AvgDaysInOffice / FTECountPerAddress)
 
 pwor_building <- read.csv(here("PBI/data/R_ProvWideOccupancy_Table.csv")) |>
-  select(Identifier, TotalRentableBuildingArea)
+  select(Identifier, TotalRentableBuildingArea, AllocationPercentageBuilding)
 
 ratings <- R_Facility_Table |>
   select(
@@ -781,9 +776,18 @@ ratings <- R_Facility_Table |>
     BuildingRentableArea = case_when(
       is.na(TotalRentableBuildingArea) ~ FacilityBuildingRentableArea,
       .default = TotalRentableBuildingArea
+    ),
+    AllocationPercentageBuilding = case_when(
+      is.na(AllocationPercentageBuilding) ~ 0,
+      .default = AllocationPercentageBuilding
     )
   ) |>
   select(-c(TotalRentableBuildingArea, FacilityBuildingRentableArea)) |>
+  relocate(
+    BuildingRentableArea,
+    AllocationPercentageBuilding,
+    .after = BuildingCategory
+  ) |>
   mutate(
     ConditionRating = case_when(
       FCI <= 0.2 ~ "Excellent",
@@ -796,12 +800,20 @@ ratings <- R_Facility_Table |>
     .after = FCI
   ) |>
   mutate(
-    CostPerSqM = FY2425TotalCost / BuildingRentableArea,
+    OccupancyAdjustedCostPerSqM = (FY2425TotalCost / BuildingRentableArea) /
+      AllocationPercentageBuilding,
     .after = FY2425TotalCost
   ) |>
-  group_by(BuildingCategory) |>
   mutate(
-    percentile = percent_rank(CostPerSqM),
+    Occupancy = case_when(
+      AllocationPercentageBuilding == 0 ~ FALSE,
+      .default = TRUE
+    ),
+    .after = AllocationPercentageBuilding
+  ) |>
+  group_by(BuildingCategory, Occupancy) |>
+  mutate(
+    percentile = percent_rank(OccupancyAdjustedCostPerSqM),
     FinancialRating = case_when(
       percentile <= 0.20 ~ "Excellent",
       percentile <= 0.40 ~ "Good",
@@ -810,23 +822,31 @@ ratings <- R_Facility_Table |>
       percentile > 0.80 ~ "Dire",
       is.na(percentile) ~ "Fair"
     ),
-    .after = CostPerSqM
+    .after = OccupancyAdjustedCostPerSqM
   ) |>
   ungroup() |>
+  mutate(
+    FinancialRating = case_when(
+      AllocationPercentageBuilding == 0 ~ "Dire",
+      .default = FinancialRating
+    )
+  ) |>
   left_join(utilization, by = join_by(Address)) |>
-  group_by(BuildingCategory) |>
+  mutate(
+    OccupancyAdjustedUtilizationRating = InPersonPct *
+      AllocationPercentageBuilding
+  ) |>
   mutate(
     UtilizationRating = case_when(
-      InPersonPct <= 0.20 ~ "Dire",
-      InPersonPct <= 0.40 ~ "Poor",
-      InPersonPct <= 0.60 ~ "Fair",
-      InPersonPct <= 0.80 ~ "Good",
-      InPersonPct > 0.80 ~ "Excellent",
-      is.na(InPersonPct) ~ "Fair"
+      OccupancyAdjustedUtilizationRating <= 0.20 ~ "Dire",
+      OccupancyAdjustedUtilizationRating <= 0.40 ~ "Poor",
+      OccupancyAdjustedUtilizationRating <= 0.60 ~ "Fair",
+      OccupancyAdjustedUtilizationRating <= 0.80 ~ "Good",
+      OccupancyAdjustedUtilizationRating > 0.80 ~ "Excellent",
+      is.na(OccupancyAdjustedUtilizationRating) ~ "Fair"
     ),
-    .after = InPersonPct
+    .after = OccupancyAdjustedUtilizationRating
   ) |>
-  ungroup() |>
   mutate(
     ConditionScore = case_when(
       ConditionRating == "Dire" ~ 1,
